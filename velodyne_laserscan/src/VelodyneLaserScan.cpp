@@ -4,7 +4,7 @@
 namespace velodyne_laserscan {
   
 VelodyneLaserScan::VelodyneLaserScan(ros::NodeHandle &nh, ros::NodeHandle &nh_priv) :
-    ring_count_(0), nh_(nh), srv_(nh_priv)
+    nh_(nh), srv_(nh_priv), ring_count_(0)
 {
   ros::SubscriberStatusCallback connect_cb = boost::bind(&VelodyneLaserScan::connectCb, this);
   pub_ = nh.advertise<sensor_msgs::LaserScan>("scan", 10, connect_cb, connect_cb);
@@ -42,7 +42,7 @@ void VelodyneLaserScan::recvCallback(const sensor_msgs::PointCloud2ConstPtr& msg
     }
     for (sensor_msgs::PointCloud2ConstIterator<uint16_t> it(*msg, "ring"); it != it.end(); ++it) {
       const uint16_t ring = *it;
-      if (ring + 1 > ring_count_) {
+      if (ring + 1u > ring_count_) {
         ring_count_ = ring + 1;
       }
     }
@@ -56,7 +56,7 @@ void VelodyneLaserScan::recvCallback(const sensor_msgs::PointCloud2ConstPtr& msg
 
   // Select ring to use
   uint16_t ring;
-  if ((cfg_.ring < 0) || (cfg_.ring >= ring_count_)) {
+  if ((cfg_.ring < 0) || ((uint)cfg_.ring >= ring_count_)) {
     // Default to ring closest to being level for each known sensor
     if (ring_count_ > 32) {
       ring = 57; // HDL-64E

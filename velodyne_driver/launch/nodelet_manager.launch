@@ -6,9 +6,10 @@
   <arg name="device_ip" default="" />
   <arg name="frame_id" default="velodyne" />
   <arg name="manager" default="$(arg frame_id)_nodelet_manager" />
-  <arg name="model" default="64E" />
+  <arg name="model" default="VLP16" />
   <arg name="pcap" default="" />
   <arg name="port" default="2368" />
+  <arg name="position_port" default="8308" />
   <arg name="read_fast" default="false" />
   <arg name="read_once" default="false" />
   <arg name="repeat_delay" default="0.0" />
@@ -26,6 +27,7 @@
     <param name="model" value="$(arg model)"/>
     <param name="pcap" value="$(arg pcap)"/>
     <param name="port" value="$(arg port)" />
+    <param name="position_port" value="$(arg position_port)" />
     <param name="read_fast" value="$(arg read_fast)"/>
     <param name="read_once" value="$(arg read_once)"/>
     <param name="repeat_delay" value="$(arg repeat_delay)"/>

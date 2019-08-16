@@ -3,6 +3,7 @@
  *  Copyright (C) 2009, 2010 Austin Robot Technology, Jack O'Quin
  *  Copyright (C) 2011 Jesse Vera
  *  Copyright (C) 2012 Austin Robot Technology, Jack O'Quin
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  License: Modified BSD Software License Agreement
  *
  *  $Id$
@@ -21,10 +22,13 @@
 
 #include <sensor_msgs/PointCloud2.h>
 #include <velodyne_pointcloud/rawdata.h>
-#include <velodyne_pointcloud/pointcloudXYZIR.h>
+#include <velodyne_pointcloud/pointcloudXYZIADRT.h>
 
 #include <dynamic_reconfigure/server.h>
 #include <velodyne_pointcloud/CloudNodeConfig.h>
+
+#include <diagnostic_updater/diagnostic_updater.h>
+#include <diagnostic_updater/publisher.h>
 
 namespace velodyne_pointcloud
 {
@@ -34,6 +38,8 @@ namespace velodyne_pointcloud
 
     Convert(ros::NodeHandle node, ros::NodeHandle private_nh);
     ~Convert() {}
+
+    bool initSuccessful();
 
   private:
     
@@ -49,11 +55,18 @@ namespace velodyne_pointcloud
     ros::Subscriber velodyne_scan_;
     ros::Publisher output_;
 
-    /// configuration parameters
-    typedef struct {
-      int npackets;                    ///< number of packets to combine
-    } Config;
-    Config config_;    
+    /** diagnostics updater */
+    ros::Timer diag_timer_;
+    diagnostic_updater::Updater diagnostics_;
+    double diag_min_freq_;
+    double diag_max_freq_;
+    boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_topic_;
+    void diagTimerCallback(const ros::TimerEvent &event);
+    
+    // A point cloud with same time and frame ID as raw data
+    PointcloudXYZIADRT outMsg;
+
+    bool init_success;
   };
 
 } // namespace velodyne_pointcloud

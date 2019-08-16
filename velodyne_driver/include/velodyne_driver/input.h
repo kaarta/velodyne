@@ -3,7 +3,7 @@
  *  Copyright (C) 2007 Austin Robot Technology, Yaxin Liu, Patrick Beeson
  *  Copyright (C) 2009, 2010 Austin Robot Technology, Jack O'Quin
  *  Copyright (C) 2015, Jack O'Quin
- *
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  License: Modified BSD Software License Agreement
  *
  *  $Id$
@@ -39,6 +39,12 @@
 
 #include <ros/ros.h>
 #include <velodyne_msgs/VelodynePacket.h>
+#include <velodyne_msgs/VelodynePositionPacket.h>
+#include <sensor_msgs/Imu.h>
+#include <sensor_msgs/NavSatFix.h>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 
 namespace velodyne_driver
 {
@@ -49,7 +55,7 @@ namespace velodyne_driver
   class Input
   {
   public:
-    Input(ros::NodeHandle private_nh, uint16_t port);
+    Input(ros::NodeHandle private_nh, uint16_t port, uint16_t position_port);
     virtual ~Input() {}
 
     /** @brief Read one Velodyne packet.
@@ -62,11 +68,44 @@ namespace velodyne_driver
      */
     virtual int getPacket(velodyne_msgs::VelodynePacket *pkt,
                           const double time_offset) = 0;
+    virtual int getPositionPacket(velodyne_msgs::VelodynePositionPacket *pkt, const double time_offset) = 0;
+
+    /** @brief Parse a position packet from the Velodyne.
+     *
+     *  @details This overwrites the old data in imuData, so imuMutex should be locked/unlocked before/after calling this.
+     *
+     *  @param b A pointer to the first byte of the position packet, not including the message header.
+     */
+    void parseImuData(const uint8_t *b);
+    void parseNmeaString(const char * nmea_string);
+    uint8_t getPPSStatus();
+    bool pollGPSData(sensor_msgs::NavSatFix* gps_fix);
+    bool pollPositionPacket(velodyne_msgs::VelodynePositionPacket* packet);
+
+    // convert a velodyne timestamp into current ROS time (currently assumes the velodyne is very closely synchronized to the sensor/IMU timestamps)
+    ros::Time parseInternalTime(uint8_t* bytes, ros::Time system_time);
+    velodyne_msgs::VelodynePositionPacket getPositionPacket();
+    sensor_msgs::NavSatFix getGPSData();
 
   protected:
     ros::NodeHandle private_nh_;
     uint16_t port_;
+    uint16_t position_port_;
     std::string devip_str_;
+    std::string last_nmea_sentence_;
+    bool process_position_packets_;
+    sensor_msgs::NavSatFix last_gps_data_;
+    velodyne_msgs::VelodynePositionPacket last_position_packet_;
+    uint8_t pps_status_;
+    bool new_gps_packet_;
+    std::mutex position_data_mutex_;
+
+    static constexpr const double gyroscopeScale = 0.09766 * M_PI / 180; // rad/sec
+    // const double temperatureScale = 0.1453; // C
+    // const double temperatureOffset = 25; // C
+
+    // used to scale the imu data integer to m/s^2
+    static constexpr const double accelerometerScale = (0.001221 * 9.80665); // m/s^2
   };
 
   /** @brief Live Velodyne input from socket. */
@@ -74,16 +113,18 @@ namespace velodyne_driver
   {
   public:
     InputSocket(ros::NodeHandle private_nh,
-                uint16_t port = DATA_PORT_NUMBER);
+                uint16_t port = DATA_PORT_NUMBER, uint16_t position_port = POSITION_PORT_NUMBER);
     virtual ~InputSocket();
 
     virtual int getPacket(velodyne_msgs::VelodynePacket *pkt, 
+                          const double time_offset);
+    virtual int getPositionPacket(velodyne_msgs::VelodynePositionPacket *pkt,
                           const double time_offset);
     void setDeviceIP( const std::string& ip );
   private:
 
   private:
-    int sockfd_;
+    int sockfd_, position_sockfd_;
     in_addr devip_;
   };
 
@@ -93,11 +134,12 @@ namespace velodyne_driver
    * Dump files can be grabbed by libpcap, Velodyne's DSR software,
    * ethereal, wireshark, tcpdump, or the \ref vdump_command.
    */
-  class InputPCAP: public Input
+  class InputPCAP : public Input
   {
   public:
     InputPCAP(ros::NodeHandle private_nh,
               uint16_t port = DATA_PORT_NUMBER,
+              uint16_t position_port = POSITION_PORT_NUMBER,
               double packet_rate = 0.0,
               std::string filename="",
               bool read_once=false,
@@ -107,6 +149,9 @@ namespace velodyne_driver
 
     virtual int getPacket(velodyne_msgs::VelodynePacket *pkt, 
                           const double time_offset);
+    virtual int getPositionPacket(velodyne_msgs::VelodynePositionPacket *pkt,
+                          const double time_offset);
+
     void setDeviceIP( const std::string& ip );
 
   private:
@@ -119,6 +164,8 @@ namespace velodyne_driver
     bool read_once_;
     bool read_fast_;
     double repeat_delay_;
+    bool new_position_packet_;
+    std::condition_variable position_data_conditional_variable_;
   };
 
 } // velodyne_driver namespace

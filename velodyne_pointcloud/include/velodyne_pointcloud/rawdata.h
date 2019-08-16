@@ -2,7 +2,7 @@
  *
  *  Copyright (C) 2007 Austin Robot Technology, Yaxin Liu, Patrick Beeson
  *  Copyright (C) 2009, 2010, 2012 Austin Robot Technology, Jack O'Quin
- *
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  License: Modified BSD Software License Agreement
  *
  *  $Id$
@@ -37,7 +37,9 @@
 namespace velodyne_rawdata
 {
     // Shorthand typedefs for point cloud representations
-  typedef velodyne_pointcloud::PointXYZIR VPoint;
+  // typedef velodyne_pointcloud::PointXYZIR VPoint;
+  typedef Kaarta::KaartaSensorPoint VPoint;
+  // typedef pcl::PointCloud<VPoint> VPointCloud;
   typedef pcl::PointCloud<VPoint> VPointCloud;
 
   /**
@@ -48,7 +50,7 @@ namespace velodyne_rawdata
   static const int SCANS_PER_BLOCK = 32;
   static const int BLOCK_DATA_SIZE = (SCANS_PER_BLOCK * RAW_SCAN_SIZE);
 
-  static const float ROTATION_RESOLUTION      =     0.01f;  // [deg]
+  static const double ROTATION_RESOLUTION     =     0.01;  // [deg]
   static const uint16_t ROTATION_MAX_UNITS    = 36000u;     // [deg/100]
 
   /** @todo make this work for both big and little-endian machines */
@@ -147,7 +149,7 @@ namespace velodyne_rawdata
      */
     int setupOffline(std::string calibration_file, double max_range_, double min_range_);
 
-    void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data);
+    void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
     
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
@@ -167,6 +169,12 @@ namespace velodyne_rawdata
     } Config;
     Config config_;
 
+
+    /** Upward or downward mount*/
+    bool upward;
+
+    int buildTimings();
+
     /** 
      * Calibration file
      */
@@ -175,7 +183,7 @@ namespace velodyne_rawdata
     float cos_rot_table_[ROTATION_MAX_UNITS];
     
     /** add private function to handle the VLP16 **/ 
-    void unpack_vlp16(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data);
+    void unpack_vlp16(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
 
     /** in-line test whether a point is in range */
     bool pointInRange(float range)
@@ -183,6 +191,9 @@ namespace velodyne_rawdata
       return (range >= config_.min_range
               && range <= config_.max_range);
     }
+
+    std::vector<std::vector<float> > timing_offsets;
+    int laser_model;
   };
 
 } // namespace velodyne_rawdata

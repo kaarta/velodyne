@@ -37,6 +37,9 @@ namespace velodyne_pointcloud
   void CloudNodelet::onInit()
   {
     conv_.reset(new Convert(getNodeHandle(), getPrivateNodeHandle()));
+    if (!conv_->initSuccessful()){
+      ROS_ERROR("Failed to init velodyne cloud converter nodelet");
+    }
   }
 
 } // namespace velodyne_pointcloud

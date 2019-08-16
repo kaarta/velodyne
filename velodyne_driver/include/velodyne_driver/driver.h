@@ -1,7 +1,7 @@
 /* -*- mode: C++ -*- */
 /*
  *  Copyright (C) 2012 Austin Robot Technology, Jack O'Quin
- * 
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  License: Modified BSD Software License Agreement
  *
  *  $Id$
@@ -36,6 +36,9 @@ public:
   ~VelodyneDriver() {}
 
   bool poll(void);
+  bool pollPosition(void);
+
+  bool initSuccessful();
 
 private:
 
@@ -62,13 +65,26 @@ private:
 
   boost::shared_ptr<Input> input_;
   ros::Publisher output_;
+  ros::Publisher position_packet_pub_;
+  ros::Publisher gps_fix_pub_;
+  ros::Publisher rpm_pub_;
 
   /** diagnostics updater */
   ros::Timer diag_timer_;
   diagnostic_updater::Updater diagnostics_;
   double diag_min_freq_;
   double diag_max_freq_;
-  boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_topic_;
+  double diag_max_position_freq_;
+  double diag_min_position_freq_;
+  bool publish_position_packets_at_same_frequency_as_scans_;
+  boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_topic_, diag_position_topic_;
+  void produce_diagnostics(diagnostic_updater::DiagnosticStatusWrapper &stat);
+  void setRPM(double frequency);        // set the RPM of the system
+  double packet_rate;                   // packet frequency (Hz)
+  int num_same_rpm_;
+  double last_rpm_;
+
+  bool init_success;
 };
 
 } // namespace velodyne_driver

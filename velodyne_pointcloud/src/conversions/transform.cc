@@ -91,7 +91,7 @@ namespace velodyne_pointcloud
         pcl_conversions::toPCL(header, inPc_.pc->header);
 
         // unpack the raw data
-        data_->unpack(scanMsg->packets[next], inPc_);
+        data_->unpack(scanMsg->packets[next], inPc_, scanMsg->header.stamp);
 
         // clear transform point cloud for this packet
         tfPc_.points.clear();           // is this needed?

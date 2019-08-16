@@ -2,7 +2,7 @@
 /*
  *  Copyright (C) 2012 Austin Robot Technology
  *  License: Modified BSD Software License Agreement
- *
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  $Id$
  */
 
@@ -26,7 +26,7 @@
 namespace velodyne_pointcloud
 {
   // shorter names for point cloud types in this namespace
-  typedef velodyne_pointcloud::PointXYZIR VPoint;
+  typedef Kaarta::KaartaSensorPoint VPoint;
   typedef pcl::PointCloud<VPoint> VPointCloud;
 
   class RingColors

@@ -1,0 +1,18 @@
+<package>
+
+  <name>velodyne_launch</name>
+  <version>0.0.0</version>
+  <description>The Velodyne launch package</description>
+  <maintainer email="zhangji@cmu.edu">Ji Zhang</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>velodyne_pointcloud</build_depend>
+  <build_depend>message_generation</build_depend>
+  
+  <run_depend>velodyne_pointcloud</run_depend>
+  <run_depend>message_runtime</run_depend>
+  <export>
+  </export>
+
+</package>

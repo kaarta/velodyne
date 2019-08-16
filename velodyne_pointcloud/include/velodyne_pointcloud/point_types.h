@@ -1,7 +1,7 @@
 /* -*- mode: C++ -*-
  *
  *  Copyright (C) 2011, 2012 Austin Robot Technology
- *
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  License: Modified BSD Software License Agreement
  *
  *  $Id: data_base.h 1554 2011-06-14 22:11:17Z jack.oquin $
@@ -20,6 +20,7 @@
 #define __VELODYNE_POINTCLOUD_POINT_TYPES_H
 
 #include <pcl/point_types.h>
+#include <clay_lib/point_definition.h>
 
 namespace velodyne_pointcloud
 {

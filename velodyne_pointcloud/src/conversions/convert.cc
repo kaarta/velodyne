@@ -2,6 +2,7 @@
  *  Copyright (C) 2009, 2010 Austin Robot Technology, Jack O'Quin
  *  Copyright (C) 2011 Jesse Vera
  *  Copyright (C) 2012 Austin Robot Technology, Jack O'Quin
+ *  Modified 2018 Kaarta - Shawn Hanna
  *  License: Modified BSD Software License Agreement
  *
  *  $Id$
@@ -19,11 +20,18 @@
 
 namespace velodyne_pointcloud
 {
+  using namespace diagnostic_updater;
   /** @brief Constructor. */
   Convert::Convert(ros::NodeHandle node, ros::NodeHandle private_nh):
-    data_(new velodyne_rawdata::RawData())
+    data_(new velodyne_rawdata::RawData()),
+    init_success(true)
   {
-    data_->setup(private_nh);
+    int result = data_->setup(private_nh);
+
+    if (result < 0){
+      init_success = false;
+      return;
+    }
 
 
     // advertise output point cloud (before subscribing to input data)
@@ -39,9 +47,22 @@ namespace velodyne_pointcloud
 
     // subscribe to VelodyneScan packets
     velodyne_scan_ =
-      node.subscribe("velodyne_packets", 10,
+      node.subscribe("velodyne_packets", 200,
                      &Convert::processScan, (Convert *) this,
                      ros::TransportHints().tcpNoDelay(true));
+
+    diagnostics_.setHardwareID("Velodyne");
+    diag_min_freq_ = diag_max_freq_ = 10;
+    diag_topic_.reset(new TopicDiagnostic("velodyne_pointcloud", diagnostics_,
+                                          FrequencyStatusParam(&diag_min_freq_,
+                                                              &diag_max_freq_,
+                                                              0.1, 5),
+                                          TimeStampStatusParam(-1, 1)));
+    diag_timer_ = private_nh.createTimer(ros::Duration(0.2), &Convert::diagTimerCallback,this);
+  }
+  
+  bool Convert::initSuccessful(){
+    return init_success;
   }
   
   void Convert::callback(velodyne_pointcloud::CloudNodeConfig &config,
@@ -58,8 +79,7 @@ namespace velodyne_pointcloud
     if (output_.getNumSubscribers() == 0)         // no one listening?
       return;                                     // avoid much work
 
-    // allocate a point cloud with same time and frame ID as raw data
-    PointcloudXYZIR outMsg;
+    outMsg.pc->points.clear();
     // outMsg's header is a pcl::PCLHeader, convert it before stamp assignment
     outMsg.pc->header.stamp = pcl_conversions::toPCL(scanMsg->header).stamp;
     outMsg.pc->header.frame_id = scanMsg->header.frame_id;
@@ -68,13 +88,21 @@ namespace velodyne_pointcloud
     // process each packet provided by the driver
     for (size_t i = 0; i < scanMsg->packets.size(); ++i)
     {
-      data_->unpack(scanMsg->packets[i], outMsg);
+      data_->unpack(scanMsg->packets[i], outMsg, scanMsg->header.stamp);
     }
 
     // publish the accumulated cloud message
     ROS_DEBUG_STREAM("Publishing " << outMsg.pc->height * outMsg.pc->width
                      << " Velodyne points, time: " << outMsg.pc->header.stamp);
     output_.publish(outMsg.pc);
+    diag_topic_->tick(scanMsg->header.stamp);
+    diagnostics_.update();
   }
 
+  void Convert::diagTimerCallback(const ros::TimerEvent &event)
+  {
+    (void)event;
+    // Call necessary to provide an error when no velodyne packets are received
+    diagnostics_.update();
+  }
 } // namespace velodyne_pointcloud
