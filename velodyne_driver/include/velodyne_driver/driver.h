@@ -76,12 +76,19 @@ private:
     double time_offset;              // time in seconds added to each velodyne time stamp
     bool enabled;                    // polling is enabled
     bool timestamp_first_packet;
+    bool detect_rpm;
   }
   config_;
 
   boost::shared_ptr<Input> input_;
   ros::Publisher output_;
   int last_azimuth_;
+
+  void setRPM(double frequency);     // set the RPM of the system
+  ros::Publisher rpm_pub_;           // rpm publisher (float)
+  double packet_rate_;               // 
+  double last_rpm_;
+  int num_same_rpm_;                 // debounce counter for the rpm calculation so the rpm output handles jitters
 
   /* diagnostics updater */
   ros::Timer diag_timer_;

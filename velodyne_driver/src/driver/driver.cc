@@ -41,6 +41,7 @@
 #include <ros/ros.h>
 #include <tf/transform_listener.h>
 #include <velodyne_msgs/VelodyneScan.h>
+#include <std_msgs/Float32.h>
 
 #include "velodyne_driver/driver.h"
 
@@ -58,43 +59,42 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
 
   // get model name, validate string, determine packet rate
   private_nh.param("model", config_.model, std::string("64E"));
-  double packet_rate;                   // packet frequency (Hz)
   std::string model_full_name;
   if ((config_.model == "64E_S2") || 
       (config_.model == "64E_S2.1"))    // generates 1333312 points per second
     {                                   // 1 packet holds 384 points
-      packet_rate = 3472.17;            // 1333312 / 384
+      packet_rate_ = 3472.17;            // 1333312 / 384
       model_full_name = std::string("HDL-") + config_.model;
     }
   else if (config_.model == "64E")
     {
-      packet_rate = 2600.0;
+      packet_rate_ = 2600.0;
       model_full_name = std::string("HDL-") + config_.model;
     }
   else if (config_.model == "64E_S3") // generates 2222220 points per second (half for strongest and half for lastest)
     {                                 // 1 packet holds 384 points
-      packet_rate = 5787.03;          // 2222220 / 384
+      packet_rate_ = 5787.03;          // 2222220 / 384
       model_full_name = std::string("HDL-") + config_.model;
     }
   else if (config_.model == "32E")
     {
-      packet_rate = 1808.0;
+      packet_rate_ = 1808.0;
       model_full_name = std::string("HDL-") + config_.model;
     }
     else if (config_.model == "32C")
     {
-      packet_rate = 1507.0;
+      packet_rate_ = 1507.0;
       model_full_name = std::string("VLP-") + config_.model;
     }
   else if (config_.model == "VLP16")
     {
-      packet_rate = 754;             // 754 Packets/Second for Last or Strongest mode 1508 for dual (VLP-16 User Manual)
+      packet_rate_ = 754;             // 754 Packets/Second for Last or Strongest mode 1508 for dual (VLP-16 User Manual)
       model_full_name = "VLP-16";
     }
   else
     {
       ROS_ERROR_STREAM("unknown Velodyne LIDAR model: " << config_.model);
-      packet_rate = 2600.0;
+      packet_rate_ = 2600.0;
     }
   std::string deviceName(std::string("Velodyne ") + model_full_name);
 
@@ -102,9 +102,20 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   ROS_INFO_STREAM(deviceName << " rotating at " << config_.rpm << " RPM");
   double frequency = (config_.rpm / 60.0);     // expected Hz rate
 
+  last_rpm_ = config_.rpm;
+  num_same_rpm_ = 11; // initialize the rpm debounce counter
+
+  private_nh.param("detect_rpm", config_.detect_rpm, false);
+  if (config_.detect_rpm){
+    ROS_INFO_STREAM("Dynamic RPM estimation enabled");
+  }
+  else{
+    ROS_INFO_STREAM(deviceName << " assumed to be rotating at " << config_.rpm << " RPM");
+  }
+
   // default number of packets for each scan is a single revolution
   // (fractions rounded up)
-  config_.npackets = (int) ceil(packet_rate / frequency);
+  config_.npackets = (int) ceil(packet_rate_ / frequency);
   private_nh.getParam("npackets", config_.npackets);
   ROS_INFO_STREAM("publishing " << config_.npackets << " packets per scan");
 
@@ -151,7 +162,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
 
   // initialize diagnostics
   diagnostics_.setHardwareID(deviceName);
-  const double diag_freq = packet_rate/config_.npackets;
+  const double diag_freq = packet_rate_/config_.npackets;
   diag_max_freq_ = diag_freq;
   diag_min_freq_ = diag_freq;
   ROS_INFO("expected frequency: %.3f (Hz)", diag_freq);
@@ -171,7 +182,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
     {
       // read data from packet capture file
       input_.reset(new velodyne_driver::InputPCAP(private_nh, udp_port,
-                                                  packet_rate, dump_file));
+                                                  packet_rate_, dump_file));
     }
   else
     {
@@ -182,8 +193,24 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   // raw packet output topic
   output_ =
     node.advertise<velodyne_msgs::VelodyneScan>("velodyne_packets", 10);
+  rpm_pub_ =
+    node.advertise<std_msgs::Float32>("velodyne_rpm", 10);
 
   last_azimuth_ = -1;
+}
+
+void VelodyneDriver::setRPM(double rpm){
+  if (rpm < 300){
+    ROS_ERROR("Invalid RPM: %lf", rpm);
+    return;
+  }
+  double frequency = (rpm / 60.0);     // expected Hz rate
+
+  config_.npackets = (int) ceil(packet_rate_ / frequency);
+
+  config_.rpm = rpm;
+
+  ROS_INFO_STREAM("New RPM detected. Publishing " << config_.npackets << " packets per scan. RPM = " << config_.rpm);
 }
 
 /** poll the device
@@ -202,6 +229,8 @@ bool VelodyneDriver::poll(void)
   // Allocate a new shared pointer for zero-copy sharing with other nodelets.
   velodyne_msgs::VelodyneScanPtr scan(new velodyne_msgs::VelodyneScan);
 
+  const std::size_t azimuth_data_pos = 100*0+2;
+
   if( config_.cut_angle >= 0) //Cut at specific angle feature enabled
   {
     scan->packets.reserve(config_.npackets);
@@ -217,7 +246,6 @@ bool VelodyneDriver::poll(void)
       scan->packets.push_back(tmp_packet);
 
       // Extract base rotation of first block in packet
-      std::size_t azimuth_data_pos = 100*0+2;
       int azimuth = *( (u_int16_t*) (&tmp_packet.data[azimuth_data_pos]));
 
       //if first packet in scan, there is no "valid" last_azimuth_
@@ -262,6 +290,54 @@ bool VelodyneDriver::poll(void)
   }
   scan->header.frame_id = config_.frame_id;
   output_.publish(scan);
+
+
+  // calculate sensor's actual RPM
+  if (config_.detect_rpm && scan->packets.size() > 2){
+    int last_azimuth = *( (u_int16_t*) (&(scan->packets.back().data[azimuth_data_pos])));
+    int first_azimuth = *( (u_int16_t*) (&scan->packets.front().data[azimuth_data_pos]));
+
+    // figure out how many revolutions we've gone through in this packet. we can't assume we guessed correctly, so 
+    int num_revolutions = 0;
+    int prev_azimuth, azimuth;
+    prev_azimuth = azimuth = first_azimuth;
+    for (unsigned int i=0; i < scan->packets.size(); ++i){
+      azimuth = *( (u_int16_t*) (&scan->packets[i].data[azimuth_data_pos]));
+      if (azimuth < prev_azimuth){
+        ++num_revolutions;
+      }
+      prev_azimuth = azimuth;
+    }
+
+    // convert delta angle to delta revolutions and then divide by delta time
+    float rpm = ( ( (36000*num_revolutions + last_azimuth - first_azimuth) / 100.) / (360) )/((scan->packets.back().stamp - scan->packets.front().stamp).toSec());
+    rpm = rpm * 60; // convert rev/sec to rev/min
+    float rpm_rounded = ( ((int)(rpm+30)) / 60) * 60;
+    ROS_DEBUG_THROTTLE(10, "number packets: %d, first azimuth: %f, last_azimuth: %f, num revolutions: %d Detected RPM: %f - rounded to multiple of 60: %f",
+                          (int) scan->packets.size(), first_azimuth/100.0f, last_azimuth/100.0f, num_revolutions, rpm, rpm_rounded);
+
+    // check to see if we're getting a few of the same RPM
+    if (last_rpm_ == rpm_rounded){
+      if (config_.rpm == rpm_rounded){
+        num_same_rpm_ = 11; // we're already set to this value, so don't process more
+      }
+      else{ // different rpm than what's expected. Let's wait to see if this continues
+        num_same_rpm_++;
+        if (num_same_rpm_ == 10){
+          // set the frequency/packet count
+          setRPM(rpm_rounded);
+        }
+      }
+    }
+    else{
+      num_same_rpm_ = 0;
+      last_rpm_ = rpm_rounded;
+    }
+    std_msgs::Float32 out;
+    out.data = rpm;
+    rpm_pub_.publish(out);
+  }
+
 
   // notify diagnostics that a message has been published, updating
   // its status
