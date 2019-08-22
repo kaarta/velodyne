@@ -117,38 +117,37 @@ inline float SQR(float val) { return val*val; }
       cos_rot_table_[rot_index] = cosf(rotation);
       sin_rot_table_[rot_index] = sinf(rotation);
     }
-   return calibration_;
+    return calibration_;
   }
 
 
   /** Set up for offline operation */
   int RawData::setupOffline(std::string calibration_file, double max_range_, double min_range_)
   {
+    config_.max_range = max_range_;
+    config_.min_range = min_range_;
+    ROS_INFO_STREAM("data ranges to publish: ["
+      << config_.min_range << ", "
+      << config_.max_range << "]");
 
-      config_.max_range = max_range_;
-      config_.min_range = min_range_;
-      ROS_INFO_STREAM("data ranges to publish: ["
-	      << config_.min_range << ", "
-	      << config_.max_range << "]");
+    config_.calibrationFile = calibration_file;
 
-      config_.calibrationFile = calibration_file;
+    ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
 
-      ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
+    calibration_.read(config_.calibrationFile);
+    if (!calibration_.initialized) {
+      ROS_ERROR_STREAM("Unable to open calibration file: " <<
+      config_.calibrationFile);
+      return -1;
+    }
 
-      calibration_.read(config_.calibrationFile);
-      if (!calibration_.initialized) {
-	  ROS_ERROR_STREAM("Unable to open calibration file: " <<
-		  config_.calibrationFile);
-	  return -1;
-      }
-
-      // Set up cached values for sin and cos of all the possible headings
-      for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
-	  float rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
-	  cos_rot_table_[rot_index] = cosf(rotation);
-	  sin_rot_table_[rot_index] = sinf(rotation);
-      }
-      return 0;
+    // Set up cached values for sin and cos of all the possible headings
+    for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
+      float rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
+      cos_rot_table_[rot_index] = cosf(rotation);
+      sin_rot_table_[rot_index] = sinf(rotation);
+    }
+    return 0;
   }
 
 
@@ -346,24 +345,25 @@ inline float SQR(float val) { return val*val; }
       // Calculate difference between current and next block's azimuth angle.
       azimuth = (float)(raw->blocks[block].rotation);
       if (block < (BLOCKS_PER_PACKET-1)){
-	raw_azimuth_diff = raw->blocks[block+1].rotation - raw->blocks[block].rotation;
+        raw_azimuth_diff = raw->blocks[block+1].rotation - raw->blocks[block].rotation;
         azimuth_diff = (float)((36000 + raw_azimuth_diff)%36000);
-	// some packets contain an angle overflow where azimuth_diff < 0 
-	if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
-	  {
-	    ROS_WARN_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block+1].rotation);
-	    // if last_azimuth_diff was not zero, we can assume that the velodyne's speed did not change very much and use the same difference
-	    if(last_azimuth_diff > 0){
-	      azimuth_diff = last_azimuth_diff;
-	    }
-	    // otherwise we are not able to use this data
-	    // TODO: we might just not use the second 16 firings
-	    else{
-	      continue;
-	    }
-	  }
+        // some packets contain an angle overflow where azimuth_diff < 0 
+        if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
+        {
+          ROS_WARN_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block+1].rotation);
+          // if last_azimuth_diff was not zero, we can assume that the velodyne's speed did not change very much and use the same difference
+          if(last_azimuth_diff > 0){
+            azimuth_diff = last_azimuth_diff;
+          }
+          // otherwise we are not able to use this data
+          // TODO: we might just not use the second 16 firings
+          else{
+            continue;
+          }
+        }
         last_azimuth_diff = azimuth_diff;
-      }else{
+      }
+      else{
         azimuth_diff = last_azimuth_diff;
       }
 
@@ -433,12 +433,12 @@ inline float SQR(float val) { return val*val; }
               distance_corr_x = 
                 (corrections.dist_correction - corrections.dist_correction_x)
                   * (xx - 2.4) / (25.04 - 2.4) 
-                + corrections.dist_correction_x;
+                  + corrections.dist_correction_x;
               distance_corr_x -= corrections.dist_correction;
               distance_corr_y = 
                 (corrections.dist_correction - corrections.dist_correction_y)
                   * (yy - 1.93) / (25.04 - 1.93)
-                + corrections.dist_correction_y;
+                  + corrections.dist_correction_y;
               distance_corr_y -= corrections.dist_correction;
             }
     
