@@ -136,6 +136,15 @@ namespace velodyne_rawdata
      */
     int setup(ros::NodeHandle private_nh);
 
+    /** \brief set up the laser configuration files using an integer laser model
+     * @param laser_model
+     *   0 = VLP16
+     *   1 = VLP32-C
+     *   2 = HDL-32e
+     * @returns true if model is one of the accepted types. False otherwise
+     */
+    bool configureLaserParams(int laser_model, bool override = false);
+
     /** \brief Set up for data processing offline. 
       * Performs the same initialization as in setup, in the abscence of a ros::NodeHandle.
       * this method is useful if unpacking data directly from bag files, without passing 
@@ -166,6 +175,7 @@ namespace velodyne_rawdata
       
       double tmp_min_angle;
       double tmp_max_angle;
+      uint8_t expected_factory_byte;
     } Config;
     Config config_;
 
@@ -173,7 +183,7 @@ namespace velodyne_rawdata
     /** Upward or downward mount*/
     bool upward;
 
-    int buildTimings();
+    bool buildTimings();
 
     /** 
      * Calibration file

@@ -30,6 +30,7 @@
   <depend>yaml-cpp</depend>
   <depend>dynamic_reconfigure</depend>
   <depend>clay_lib</depend>
+  <depend>kaarta_io</depend>
 
   <exec_depend>velodyne_laserscan</exec_depend>
 

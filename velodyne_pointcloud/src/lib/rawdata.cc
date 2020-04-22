@@ -33,6 +33,7 @@
 #include <angles/angles.h>
 
 #include <velodyne_pointcloud/rawdata.h>
+#include <kaarta_io/ScanInfoManagerClient.hpp>
 
 namespace velodyne_rawdata
 {
@@ -73,39 +74,90 @@ namespace velodyne_rawdata
     }
   }
 
-  /** Set up for on-line operation. */
-  int RawData::setup(ros::NodeHandle private_nh)
-  {
+  bool RawData::configureLaserParams(int laser_model_, bool override){
+    bool res = true;
+    ROS_INFO("Configuring laser_model to: %d", laser_model_);
+    laser_model = laser_model_;
+
+    if (override){
+      // set the parameter and log the change
+      Kaarta::ScanInfoManagerROSClient client;
+      if (client.init(true)){
+        client.publishFormatStr("/adjusted_laser_model", "true");
+        client.publishFormatStr("/laser_model", "%d", laser_model);
+      }
+      ros::param::set("/laser_model", laser_model);
+    }
+    
     // get path to angles.config file for this device
-    private_nh.getParam("/laser_model", laser_model);
+    config_.expected_factory_byte = (uint8_t) 0;
     if (laser_model == 0){
       std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/VLP16db.yaml";
+      config_.expected_factory_byte = (uint8_t) 0x22;
       ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 1){
       std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
+      config_.expected_factory_byte = (uint8_t) 0x28;
       ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 2){
       std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/32db.yaml";
+      config_.expected_factory_byte = (uint8_t) 0x21;
+      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
+    }
+    else if (laser_model == 16){
+      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
+      config_.calibrationFile = pkgPath + "/params/64e_utexas.yaml";
+      config_.expected_factory_byte = (uint8_t) 0;
       ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else{
       // check calibration file
+      res = false;
+    }
+    
+    ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
+
+    calibration_.read(config_.calibrationFile);
+    if (!calibration_.initialized) {
+      ROS_ERROR_STREAM("Unable to open calibration file: " << 
+          config_.calibrationFile);
+      res = false;
+    }
+
+    // Set up cached values for sin and cos of all the possible headings
+    for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
+      double rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
+      cos_rot_table_[rot_index] = cos(rotation);
+      sin_rot_table_[rot_index] = sin(rotation);
+    }
+
+    ROS_INFO_STREAM("Number of lasers: " << calibration_.num_lasers << ". Building firing times lookup table");
+    buildTimings();
+
+    return res;
+  }
+
+  /** Set up for on-line operation. */
+  int RawData::setup(ros::NodeHandle private_nh)
+  {
+    // set laser parameters
+    laser_model = 0;
+    private_nh.getParam("/laser_model", laser_model);
+    if (!configureLaserParams(laser_model)){
       if (!private_nh.getParam("calibration", config_.calibrationFile))
       {
-        ROS_ERROR_STREAM("No calibration angles specified! Using test values!");
+        ROS_ERROR("No calibration angles specified! Using test values!");
 
         // have to use something: grab unit test version as a default
         std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
         config_.calibrationFile = pkgPath + "/params/64e_utexas.yaml";
       }
-      return -1;
     }
-
 
     if (!private_nh.getParam("upward", upward))
     {
@@ -115,30 +167,12 @@ namespace velodyne_rawdata
       upward = true;
     }
 
-    ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
-
-    calibration_.read(config_.calibrationFile);
-    if (!calibration_.initialized) {
-      ROS_ERROR_STREAM("Unable to open calibration file: " << 
-          config_.calibrationFile);
-      return -1;
-    }
-    
-    ROS_INFO_STREAM("Number of lasers: " << calibration_.num_lasers << ".");
-    /* int timingCalcResult =  */buildTimings();
-
-    // Set up cached values for sin and cos of all the possible headings
-    for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
-      double rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
-      cos_rot_table_[rot_index] = cos(rotation);
-      sin_rot_table_[rot_index] = sin(rotation);
-    }
 
     return 0;
   }
 
 
-  int RawData::buildTimings(){
+  bool RawData::buildTimings(){
     // vlp16
     if (laser_model == 0){
       // timing table calculation, from velodyne user manual
@@ -233,8 +267,9 @@ namespace velodyne_rawdata
     }
     else{
       ROS_WARN("NO TIMING OFFSETS CALCULATED. ARE YOU USING A SUPPORTED VELODYNE SENSOR?");
+      return false;
     }
-    return 0;
+    return true;
   }
 
   /** Set up for offline operation */
@@ -270,7 +305,6 @@ namespace velodyne_rawdata
       return 0;
   }
 
-
   /** @brief convert raw packet to point cloud
    *
    *  @param pkt raw packet to unpack
@@ -279,6 +313,31 @@ namespace velodyne_rawdata
   void RawData::unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp)
   {
     // ROS_WARN_STREAM("Received packet, time: " << pkt.stamp <<" scan begin time = "<<scan_begin_stamp << "diff = " << (scan_begin_stamp - pkt.stamp));
+
+    if (pkt.data[0x4b5] != config_.expected_factory_byte){
+      ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
+      switch(pkt.data[0x4b5]){
+        case 0x22:
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0");
+          configureLaserParams(0, true);
+          break;
+        case 0x28:
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1");
+          configureLaserParams(1, true);
+          break;
+        case 0x21:
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2");
+          configureLaserParams(2, true);
+          break;
+        default:
+          ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
+          exit(1);
+      }
+    }
+
+    if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
+      ROS_ERROR_THROTTLE(1, "Expected return mode: 0x37. Got: %#02x", pkt.data[0x4b4]);
+    }
 
     /** special parsing for the VLP16 **/
     if (calibration_.num_lasers == 16)
