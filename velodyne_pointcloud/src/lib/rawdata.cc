@@ -336,7 +336,18 @@ namespace velodyne_rawdata
     }
 
     if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
-      ROS_ERROR_THROTTLE(1, "Expected return mode: 0x37. Got: %#02x", pkt.data[0x4b4]);
+      switch(pkt.data[0x4b4])
+      {
+        case 0x38:
+          ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (last)", pkt.data[0x4b4]);
+          break;
+        case 0x39:
+          ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (dual)", pkt.data[0x4b4]);
+          break;
+        default:
+          ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (unknown)", pkt.data[0x4b4]);
+          break;
+      }
     }
 
     /** special parsing for the VLP16 **/
