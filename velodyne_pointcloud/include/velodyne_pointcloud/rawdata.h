@@ -143,7 +143,7 @@ namespace velodyne_rawdata
      *   2 = HDL-32e
      * @returns true if model is one of the accepted types. False otherwise
      */
-    bool configureLaserParams(int laser_model, bool override = false);
+    bool configureLaserParams(int laser_model, bool dual_mode, bool override = false);
 
     /** \brief Set up for data processing offline. 
       * Performs the same initialization as in setup, in the abscence of a ros::NodeHandle.
@@ -176,6 +176,7 @@ namespace velodyne_rawdata
       double tmp_min_angle;
       double tmp_max_angle;
       uint8_t expected_factory_byte;
+      bool dual_return_mode;
     } Config;
     Config config_;
 
