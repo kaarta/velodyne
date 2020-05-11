@@ -175,6 +175,7 @@ namespace velodyne_rawdata
       
       double tmp_min_angle;
       double tmp_max_angle;
+      float intensity_slope;
       uint8_t expected_factory_byte;
     } Config;
     Config config_;

@@ -166,7 +166,20 @@ namespace velodyne_rawdata
       // use default upward mounting direction
       upward = true;
     }
+    else
+    {
+      ROS_INFO("Using upward mounting: %d", upward);
+    }
 
+    if (!private_nh.getParam("intensity_slope", config_.intensity_slope))
+    {
+      config_.intensity_slope = 0;
+      ROS_ERROR("Failed to get intensity_slope param. Using '0'");
+    }
+    else
+    {
+      ROS_WARN("Using intensity_slope: %f", config_.intensity_slope);
+    }    
 
     return 0;
   }
@@ -409,6 +422,24 @@ namespace velodyne_rawdata
           }
 
           distance += corrections.dist_correction;
+
+          /** Intensity Calculation */
+          float min_intensity = corrections.min_intensity;
+          float max_intensity = corrections.max_intensity;
+  
+          intensity = raw->blocks[i].data[k+2];
+  
+          float tmp_2 = (1 - corrections.focal_distance / 13100);
+          float focal_offset = 256 * tmp_2 * tmp_2;
+
+          float focal_slope = corrections.focal_slope;
+          intensity += focal_slope * (std::abs(focal_offset - 256 * 
+            (1 - static_cast<float>(tmp.uint)/65535)*(1 - static_cast<float>(tmp.uint)/65535)));
+          intensity = (intensity < min_intensity) ? min_intensity : intensity;
+          intensity = (intensity > max_intensity) ? max_intensity : intensity;
+
+          if (config_.intensity_slope != 0)
+            distance = distance * (1 - (config_.intensity_slope * intensity));
   
           float cos_vert_angle = corrections.cos_vert_correction;
           float sin_vert_angle = corrections.sin_vert_correction;
@@ -488,22 +519,6 @@ namespace velodyne_rawdata
           float x_coord = y;
           float y_coord = -x;
           float z_coord = z;
-  
-          /** Intensity Calculation */
-  
-          float min_intensity = corrections.min_intensity;
-          float max_intensity = corrections.max_intensity;
-  
-          intensity = raw->blocks[i].data[k+2];
-  
-          float tmp_2 = (1 - corrections.focal_distance / 13100);
-          float focal_offset = 256 * tmp_2 * tmp_2;
-
-          float focal_slope = corrections.focal_slope;
-          intensity += focal_slope * (std::abs(focal_offset - 256 * 
-            (1 - static_cast<float>(tmp.uint)/65535)*(1 - static_cast<float>(tmp.uint)/65535)));
-          intensity = (intensity < min_intensity) ? min_intensity : intensity;
-          intensity = (intensity > max_intensity) ? max_intensity : intensity;
   
           if (pointInRange(distance)) {
             // add point to cloud
@@ -627,6 +642,25 @@ namespace velodyne_rawdata
 
             distance += corrections.dist_correction;
             
+    
+            /** Intensity Calculation */
+            float min_intensity = corrections.min_intensity;
+            float max_intensity = corrections.max_intensity;
+    
+            intensity = raw->blocks[block].data[k+2];
+
+            float tmp_2 = (1 - corrections.focal_distance / 13100);
+    
+            float focal_offset = 256 * tmp_2 * tmp_2;
+            float focal_slope = corrections.focal_slope;
+            intensity += focal_slope * (std::abs(focal_offset - 256 * 
+              (1 - tmp.uint/65535)*(1 - tmp.uint/65535)));
+            intensity = (intensity < min_intensity) ? min_intensity : intensity;
+            intensity = (intensity > max_intensity) ? max_intensity : intensity;
+
+            if (config_.intensity_slope != 0)
+              distance = distance * (1 - (config_.intensity_slope * intensity));
+            
             float cos_vert_angle = corrections.cos_vert_correction;
             float sin_vert_angle = corrections.sin_vert_correction;
             float cos_rot_correction = corrections.cos_rot_correction;
@@ -704,21 +738,6 @@ namespace velodyne_rawdata
             float x_coord = y;
             float y_coord = -x;
             float z_coord = z;
-    
-            /** Intensity Calculation */
-            float min_intensity = corrections.min_intensity;
-            float max_intensity = corrections.max_intensity;
-    
-            intensity = raw->blocks[block].data[k+2];
-
-            float tmp_2 = (1 - corrections.focal_distance / 13100);
-    
-            float focal_offset = 256 * tmp_2 * tmp_2;
-            float focal_slope = corrections.focal_slope;
-            intensity += focal_slope * (std::abs(focal_offset - 256 * 
-              (1 - tmp.uint/65535)*(1 - tmp.uint/65535)));
-            intensity = (intensity < min_intensity) ? min_intensity : intensity;
-            intensity = (intensity > max_intensity) ? max_intensity : intensity;
 
             // add point to cloud
             if (pointInRange(distance)){
