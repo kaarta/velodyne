@@ -86,6 +86,7 @@ namespace velodyne_driver
     ros::Time parseInternalTime(uint8_t* bytes, ros::Time system_time);
     velodyne_msgs::VelodynePositionPacket getPositionPacket();
     sensor_msgs::NavSatFix getGPSData();
+    const sensor_msgs::Imu& getIMUData(){ return imu_data_; };
 
   protected:
     ros::NodeHandle private_nh_;
@@ -95,6 +96,7 @@ namespace velodyne_driver
     std::string last_nmea_sentence_;
     bool process_position_packets_;
     sensor_msgs::NavSatFix last_gps_data_;
+    sensor_msgs::Imu imu_data_;
     velodyne_msgs::VelodynePositionPacket last_position_packet_;
     uint8_t pps_status_;
     bool new_gps_packet_;
