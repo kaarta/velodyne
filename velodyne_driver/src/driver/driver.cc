@@ -119,6 +119,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   private_nh.param("pcap", dump_file, std::string(""));
 
   private_nh.param("publish_position_packets_at_same_frequency_as_scans", publish_position_packets_at_same_frequency_as_scans_, true);
+  private_nh.param("publish_imu", publish_imu_, true);
 
   double cut_angle;
   private_nh.param("cut_angle", cut_angle, -0.01);
@@ -203,6 +204,8 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
       node.advertise<velodyne_msgs::VelodynePositionPacket>("velodyne_position_packets", 10);
     gps_fix_pub_ =
       node.advertise<sensor_msgs::NavSatFix>("velodyne_gps_fix", 10);
+    imu_pub_ = 
+      node.advertise<sensor_msgs::Imu>("velodyne_imu", 10);
   }
 }
 
@@ -319,9 +322,9 @@ bool VelodyneDriver::poll(void)
     position_packet_pub_.publish(position_packet);
 
     // if we have new gps data, publish it
-    if ( input_->pollGPSData(&gps_data_) ){
-      gps_fix_pub_.publish(gps_data_);
-    }
+    // if ( input_->pollGPSData(&gps_data_) ){
+    //   gps_fix_pub_.publish(gps_data_);
+    // }
 
     // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
     diag_position_topic_->tick(position_packet.stamp);
@@ -398,12 +401,20 @@ bool VelodyneDriver::pollPosition(void){
         position_packet_pub_.publish(position_packet_);
 
         // if we have new gps data, publish it
-        if ( input_->pollGPSData(&gps_data_) ){
-          gps_fix_pub_.publish(gps_data_);
-        }
         // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
         diag_position_topic_->tick(position_packet_.stamp);
         diagnostics_.update();
+      }
+      if ( input_->pollGPSData(&gps_data_) ){
+        if (gps_data_.header.stamp != last_gps_data_stamp_)
+        {
+          gps_fix_pub_.publish(gps_data_);
+          last_gps_data_stamp_ = gps_data_.header.stamp;
+        }
+      }
+      if (publish_imu_)
+      {
+        imu_pub_.publish(input_->getIMUData());
       }
       break;
     }
