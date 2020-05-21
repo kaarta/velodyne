@@ -181,8 +181,8 @@ namespace velodyne_rawdata
         timing_offsets[i].resize(32);
       }
       // constants
-      double full_firing_cycle = 55.296 * 1e-6; // seconds
-      double single_firing = 2.304 * 1e-6; // seconds
+      double full_firing_cycle = VLP16_FIRING_TOFFSET; // seconds
+      double single_firing = VLP16_DSR_TOFFSET; // seconds
       double dataBlockIndex, dataPointIndex;
       bool dual_mode = false;
       // compute timing offsets
@@ -208,8 +208,8 @@ namespace velodyne_rawdata
         timing_offsets[i].resize(32);
       }
       // constants
-      double full_firing_cycle = 55.296 * 1e-6; // seconds
-      double single_firing = 2.304 * 1e-6; // seconds
+      double full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
+      double single_firing = VLP32C_DSR_TOFFSET; // seconds
       double dataBlockIndex, dataPointIndex;
       bool dual_mode = false;
       // compute timing offsets
@@ -234,8 +234,8 @@ namespace velodyne_rawdata
         timing_offsets[i].resize(32);
       }
       // constants
-      double full_firing_cycle = 46.080 * 1e-6; // seconds
-      double single_firing = 1.152 * 1e-6; // seconds
+      double full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
+      double single_firing = HDL32E_DSR_TOFFSET; // seconds
       double dataBlockIndex, dataPointIndex;
       bool dual_mode = false;
       // compute timing offsets
@@ -356,23 +356,57 @@ namespace velodyne_rawdata
       unpack_vlp16(pkt, data, scan_begin_stamp);
       return;
     }
+
     velodyne_rawdata::VPoint point;
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
-    
+
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
 
-    for (int i = 0; i < BLOCKS_PER_PACKET; i++) {
+    int16_t last_azimuth_diff = 0; // default to 600 RPM assumption
+    for (int block = 0; block < BLOCKS_PER_PACKET; block++) {
 
       // upper bank lasers are numbered [0..31]
       // NOTE: this is a change from the old velodyne_common implementation
       int bank_origin = 0;
-      if (raw->blocks[i].header == LOWER_BANK) {
+      if (raw->blocks[block].header == LOWER_BANK) {
         // lower bank lasers are [32..63]
         bank_origin = 32;
       }
 
+      uint16_t block_azimuth = raw->blocks[block].rotation;
+
+      float full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
+      float single_firing = VLP32C_DSR_TOFFSET; // seconds
+      float block_duration = VLP32C_BLOCK_TDURATION;
+      if (laser_model == 2){
+        full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
+        single_firing = HDL32E_DSR_TOFFSET; // seconds
+        block_duration = HDL32E_BLOCK_TDURATION;
+      }
+
+      int16_t azimuth_diff;
+      if (block < (BLOCKS_PER_PACKET-1)){
+        int16_t raw_azimuth_diff;
+        raw_azimuth_diff = (int)(raw->blocks[block+1].rotation) - raw->blocks[block].rotation;
+
+        // some packets contain an angle overflow where azimuth_diff < 0 
+        if(raw_azimuth_diff < 0)
+        {
+          raw_azimuth_diff = ((int)(raw->blocks[block+1].rotation) + 36000) - raw->blocks[block].rotation;
+          ROS_INFO_STREAM_THROTTLE(5, "Angle overflow: " << raw->blocks[block+1].rotation << " - "<<raw->blocks[block].rotation << " < 0. res = " << raw_azimuth_diff);
+          azimuth_diff = raw_azimuth_diff;
+        }
+        else{
+          azimuth_diff = (float)((raw_azimuth_diff) % 36000);
+        }
+        last_azimuth_diff = azimuth_diff;
+      }else{
+        azimuth_diff = last_azimuth_diff;
+      }
+
+      // ROS_INFO_STREAM("Angle Diff: " << raw->blocks[block+1].rotation << " - "<<raw->blocks[block].rotation << " = " << azimuth_diff);
+
       for (int j = 0, k = 0; j < SCANS_PER_BLOCK; j++, k += RAW_SCAN_SIZE) {
-        
         float x, y, z;
         float intensity;
         // float rot_comp;
@@ -385,16 +419,19 @@ namespace velodyne_rawdata
         /** Position Calculation */
 
         union two_bytes tmp;
-        tmp.bytes[0] = raw->blocks[i].data[k];
-        tmp.bytes[1] = raw->blocks[i].data[k+1];
-        /*condition added to avoid calculating points which are not
-          in the interesting defined area (min_angle < area < max_angle)*/
-        uint16_t raw_azimuth = raw->blocks[i].rotation;
+        tmp.bytes[0] = raw->blocks[block].data[k];
+        tmp.bytes[1] = raw->blocks[block].data[k+1];
+          /** correct for the laser rotation as a function of timing during the firings **/
+        uint16_t azimuth_corrected = round( block_azimuth + (azimuth_diff * ( (j / 2) * single_firing) / block_duration) );
+        uint16_t raw_azimuth = ((int)azimuth_corrected) % 36000;
+        // ROS_INFO_STREAM_COND(num > 1000 && block < 2, "Angle " << j <<": " << raw_azimuth << " \t time = " << timing_offsets[block][j]);
         // if hdl32, rotate by 90 deg
         if (laser_model == 2) {
           raw_azimuth = (raw_azimuth + 9000) % 36000;
         }
-        
+
+        /*condition added to avoid calculating points which are not
+          in the interesting defined area (min_angle < area < max_angle)*/
         if ((raw_azimuth >= config_.min_angle 
              && raw_azimuth <= config_.max_angle 
              && config_.min_angle < config_.max_angle)
@@ -494,7 +531,7 @@ namespace velodyne_rawdata
           float min_intensity = corrections.min_intensity;
           float max_intensity = corrections.max_intensity;
   
-          intensity = raw->blocks[i].data[k+2];
+          intensity = raw->blocks[block].data[k+2];
   
           float tmp_2 = (1 - corrections.focal_distance / 13100);
           float focal_offset = 256 * tmp_2 * tmp_2;
@@ -504,7 +541,7 @@ namespace velodyne_rawdata
             (1 - static_cast<float>(tmp.uint)/65535)*(1 - static_cast<float>(tmp.uint)/65535)));
           intensity = (intensity < min_intensity) ? min_intensity : intensity;
           intensity = (intensity > max_intensity) ? max_intensity : intensity;
-  
+
           if (pointInRange(distance)) {
             // add point to cloud
             point.x = x_coord;
@@ -521,7 +558,7 @@ namespace velodyne_rawdata
             point.distance = distance;
             point.intensity = intensity;
             if (timing_offsets.size())
-              point.time = timing_offsets[i][j] + time_diff_start_to_this_packet;
+              point.time = timing_offsets[block][j] + time_diff_start_to_this_packet;
 
             data.addPoint(point);
           }
