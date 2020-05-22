@@ -361,8 +361,8 @@ namespace velodyne_rawdata
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
 
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
+    static int last_azimuth_diff = 20; // TODO: default to 600 RPM assumption
 
-    int16_t last_azimuth_diff = 0; // default to 600 RPM assumption
     for (int block = 0; block < BLOCKS_PER_PACKET; block++) {
 
       // upper bank lasers are numbered [0..31]
@@ -384,27 +384,26 @@ namespace velodyne_rawdata
         block_duration = HDL32E_BLOCK_TDURATION;
       }
 
-      int16_t azimuth_diff;
+      int azimuth_diff = 0;
       if (block < (BLOCKS_PER_PACKET-1)){
-        int16_t raw_azimuth_diff;
-        raw_azimuth_diff = (int)(raw->blocks[block+1].rotation) - raw->blocks[block].rotation;
+        int raw_azimuth_diff = (int)(raw->blocks[block+1].rotation) - (int)raw->blocks[block].rotation;
 
         // some packets contain an angle overflow where azimuth_diff < 0 
         if(raw_azimuth_diff < 0)
         {
-          raw_azimuth_diff = ((int)(raw->blocks[block+1].rotation) + 36000) - raw->blocks[block].rotation;
-          ROS_INFO_STREAM_THROTTLE(5, "Angle overflow: " << raw->blocks[block+1].rotation << " - "<<raw->blocks[block].rotation << " < 0. res = " << raw_azimuth_diff);
+          raw_azimuth_diff = raw_azimuth_diff + 36000;
+          // ROS_WARN_STREAM("Angle overflow: " << raw->blocks[block+1].rotation << " - "<<raw->blocks[block].rotation << " < 0. res = " << raw_azimuth_diff);
           azimuth_diff = raw_azimuth_diff;
         }
         else{
-          azimuth_diff = (float)((raw_azimuth_diff) % 36000);
+          azimuth_diff = raw_azimuth_diff % 36000;
         }
         last_azimuth_diff = azimuth_diff;
       }else{
         azimuth_diff = last_azimuth_diff;
       }
 
-      // ROS_INFO_STREAM("Angle Diff: " << raw->blocks[block+1].rotation << " - "<<raw->blocks[block].rotation << " = " << azimuth_diff);
+      // ROS_WARN_STREAM_COND(block < BLOCKS_PER_PACKET-1, "Block [" << block << "]. Angle Diff: " << raw->blocks[block+1].rotation << " - "<<raw->blocks[block].rotation << " = " << azimuth_diff);
 
       for (int j = 0, k = 0; j < SCANS_PER_BLOCK; j++, k += RAW_SCAN_SIZE) {
         float x, y, z;
@@ -423,21 +422,25 @@ namespace velodyne_rawdata
         tmp.bytes[1] = raw->blocks[block].data[k+1];
           /** correct for the laser rotation as a function of timing during the firings **/
         uint16_t azimuth_corrected = round( block_azimuth + (azimuth_diff * ( (j / 2) * single_firing) / block_duration) );
-        uint16_t raw_azimuth = ((int)azimuth_corrected) % 36000;
-        // ROS_INFO_STREAM_COND(num > 1000 && block < 2, "Angle " << j <<": " << raw_azimuth << " \t time = " << timing_offsets[block][j]);
+        azimuth_corrected = ((int)azimuth_corrected) % 36000;
+        // ROS_ERROR_STREAM_COND(num > 1000, "Angle " << j <<": " << azimuth_corrected << " \t time = " << timing_offsets[block][j]);
         // if hdl32, rotate by 90 deg
         if (laser_model == 2) {
-          raw_azimuth = (raw_azimuth + 9000) % 36000;
+          azimuth_corrected = (azimuth_corrected + 9000) % 36000;
         }
+
+        // ROS_WARN_COND(azimuth_corrected > 36000, "Corrected azimuth > 36000: %d", (int)azimuth_corrected);
+        // ROS_WARN_COND(block < BLOCKS_PER_PACKET-1 && raw->blocks[block+1].rotation < raw->blocks[block].rotation && !(azimuth_corrected < raw->blocks[block+1].rotation || azimuth_corrected >= raw->blocks[block].rotation), "Corrected azimuth not correct. Azimuth next block = %d. Azimuth current block range = %d: azimuth %d. block = %d", (int)raw->blocks[block+1].rotation, (int)raw->blocks[block].rotation, (int)azimuth_corrected, block);
+        // ROS_WARN_COND(block < BLOCKS_PER_PACKET-1 && raw->blocks[block+1].rotation > raw->blocks[block].rotation && (azimuth_corrected >= raw->blocks[block+1].rotation || azimuth_corrected < raw->blocks[block].rotation), "Corrected azimuth not correct. Azimuth next block = %d. Azimuth current block range = %d: azimuth %d. block = %d", (int)raw->blocks[block+1].rotation, (int)raw->blocks[block].rotation, (int)azimuth_corrected, block);
 
         /*condition added to avoid calculating points which are not
           in the interesting defined area (min_angle < area < max_angle)*/
-        if ((raw_azimuth >= config_.min_angle 
-             && raw_azimuth <= config_.max_angle 
+        if ((azimuth_corrected >= config_.min_angle 
+             && azimuth_corrected <= config_.max_angle 
              && config_.min_angle < config_.max_angle)
              ||(config_.min_angle > config_.max_angle 
-             && (raw_azimuth <= config_.max_angle 
-             || raw_azimuth >= config_.min_angle))){
+             && (azimuth_corrected <= config_.max_angle 
+             || azimuth_corrected >= config_.min_angle))){
           float distance = tmp.uint * calibration_.distance_resolution_m;
 
           // skip zero distance (invalid) points
@@ -455,11 +458,11 @@ namespace velodyne_rawdata
           // cos(a-b) = cos(a)*cos(b) + sin(a)*sin(b)
           // sin(a-b) = sin(a)*cos(b) - cos(a)*sin(b)
           float cos_rot_angle = 
-            cos_rot_table_[raw_azimuth] * cos_rot_correction + 
-            sin_rot_table_[raw_azimuth] * sin_rot_correction;
+            cos_rot_table_[azimuth_corrected] * cos_rot_correction + 
+            sin_rot_table_[azimuth_corrected] * sin_rot_correction;
           float sin_rot_angle = 
-            sin_rot_table_[raw_azimuth] * cos_rot_correction - 
-            cos_rot_table_[raw_azimuth] * sin_rot_correction;
+            sin_rot_table_[azimuth_corrected] * cos_rot_correction - 
+            cos_rot_table_[azimuth_corrected] * sin_rot_correction;
   
           float horiz_offset = corrections.horiz_offset_correction;
           float vert_offset = corrections.vert_offset_correction;
@@ -554,7 +557,7 @@ namespace velodyne_rawdata
               point.z = -z_coord;
             }
             point.ring = corrections.laser_ring;
-            point.azimuth = (raw_azimuth / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
+            point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
             point.distance = distance;
             point.intensity = intensity;
             if (timing_offsets.size())
