@@ -142,6 +142,40 @@ namespace velodyne_rawdata
     return res;
   }
 
+  bool RawData::updateCalibration(int level, int laser_number, double& angle, bool save)
+  {
+    if (level != 4 && level != 8)
+    {
+      return true;
+    }
+    if (configureLaserParams(laser_model))
+    {
+      auto it = calibration_.laser_corrections.find(laser_number);
+      if (it == calibration_.laser_corrections.end())
+      {
+        ROS_ERROR_STREAM("Invalid ring number for this sensor. min = 0, max = " << calibration_.num_lasers);
+        return false;
+      }
+
+      it->second.vert_correction += angle;
+
+      ROS_INFO_STREAM("Setting laser " << it->first << " angle to: " << it->second.vert_correction);
+
+      if (save)
+      {
+        calibration_.write(config_.calibrationFile);
+      }
+      
+      // ROS_INFO_STREAM("Read laser value: " << laser_number << " angle = " << calibration_.laser_corrections[laser_number].vert_correction );
+      return true;
+    }
+    else
+    {
+      ROS_ERROR("Failed to reconfigure laser");
+      return false;
+    }
+  }
+
   /** Set up for on-line operation. */
   int RawData::setup(ros::NodeHandle private_nh)
   {
@@ -166,7 +200,6 @@ namespace velodyne_rawdata
       // use default upward mounting direction
       upward = true;
     }
-
 
     return 0;
   }
