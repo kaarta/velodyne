@@ -142,7 +142,7 @@ namespace velodyne_rawdata
     return res;
   }
 
-  bool RawData::updateCalibration(int level, int laser_number, double& angle, bool save)
+  bool RawData::updateCalibration(int level, int laser_number, double& angle, double& distance, double& rot_correction, bool& save)
   {
     if (level != 4 && level != 8)
     {
@@ -158,8 +158,20 @@ namespace velodyne_rawdata
       }
 
       it->second.vert_correction += angle;
+      it->second.dist_correction += distance;
+      it->second.rot_correction += rot_correction;
 
-      ROS_INFO_STREAM("Setting laser " << it->first << " angle to: " << it->second.vert_correction);
+      // Calculate cached values
+      it->second.cos_rot_correction =
+        cosf(it->second.rot_correction);
+      it->second.sin_rot_correction =
+        sinf(it->second.rot_correction);
+      it->second.cos_vert_correction =
+        cosf(it->second.vert_correction);
+      it->second.sin_vert_correction =
+        sinf(it->second.vert_correction);
+
+      ROS_INFO_STREAM("Setting laser " << it->first << " angle to: " << it->second.vert_correction << " distance: " << it->second.dist_correction <<", rot_correction: " << it->second.rot_correction);
 
       if (save)
       {

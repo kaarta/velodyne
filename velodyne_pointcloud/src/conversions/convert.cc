@@ -72,7 +72,7 @@ namespace velodyne_pointcloud
   data_->setParameters(config.min_range, config.max_range, config.view_direction,
                        config.view_width);
   
-    data_->updateCalibration(level, config.laser_number, config.laser_vertical_offset, config.save_offset );
+    data_->updateCalibration(level, config.laser_number, config.laser_vertical_offset, config.distance_offset, config.rot_correction, config.save_offset );
   }
 
   /** @brief Callback for raw scan messages. */

@@ -145,7 +145,7 @@ namespace velodyne_rawdata
      */
     bool configureLaserParams(int laser_model, bool override = false);
 
-    bool updateCalibration(int level, int laser_number, double& angle, bool save);
+    bool updateCalibration(int level, int laser_number, double& angle, double& distance, double& rot_correction, bool& save);
 
     /** \brief Set up for data processing offline. 
       * Performs the same initialization as in setup, in the abscence of a ros::NodeHandle.
