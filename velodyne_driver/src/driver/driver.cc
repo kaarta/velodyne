@@ -282,8 +282,8 @@ bool VelodyneDriver::poll(void)
       	 || ( config_.cut_angle <= azimuth && azimuth < last_azimuth)
       	 || (azimuth < last_azimuth && last_azimuth < config_.cut_angle))
       {
+        ROS_DEBUG("Last azimuth. last azimuth: %d. azimuth: %d", last_azimuth, azimuth);
         last_azimuth = azimuth;
-        ROS_DEBUG("Last azimuth. cut done: %d", last_azimuth);
         break; // Cut angle passed, one full revolution collected
       }
       last_azimuth = azimuth;
@@ -310,6 +310,24 @@ bool VelodyneDriver::poll(void)
   }
 
   // publish message using time of first packet
+  if (scan->packets.size() < config_.npackets * .95 || scan->packets.size() > config_.npackets * 1.05)
+  {
+    ROS_WARN_THROTTLE(0.01, "Weird number of packets: %d. Expected: %d",
+                      (int)scan->packets.size(), (int)config_.npackets);
+  
+    int delta = 0;
+    static int azimuth_prev;
+    static int azimuth;
+    for (int i=0;i < scan->packets.size(); ++i)
+    {
+      int azimuth = *( (u_int16_t*) (&scan->packets[i].data[azimuth_data_pos]));
+
+      delta = (azimuth - azimuth_prev + 36000) % 36000;
+
+      ROS_DEBUG("Azimuth[%d]: %8d. delta: %8d", i, azimuth, delta);
+      azimuth_prev = azimuth;
+    }
+  }
   ROS_DEBUG("Publishing a full Velodyne scan.");
   scan->header.stamp = scan->packets.front().stamp;
   scan->header.frame_id = config_.frame_id;

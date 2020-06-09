@@ -614,7 +614,7 @@ namespace velodyne_driver
     std::string s(nmea_string);
     if (s.compare(last_nmea_sentence_) == 0){
       // identical packet. don't rebroadcast
-      ROS_DEBUG("Identical NMEA string received: %s", nmea_string);
+      // ROS_DEBUG("Identical NMEA string received: %s", nmea_string);
       return;
     }
     last_nmea_sentence_ = s;
@@ -644,7 +644,7 @@ namespace velodyne_driver
     }else{
       gpsData.latitude = - (int_lat+ (lat - int_lat)/0.6);
     }
-    ROS_DEBUG_STREAM(gpsData.latitude);
+    ROS_DEBUG_STREAM("Velodyne packet latitude:" << gpsData.latitude);
 
     //longitude
     float lon = strtof(tokens[5].c_str(), NULL)/100;
@@ -654,7 +654,7 @@ namespace velodyne_driver
     }else{
       gpsData.longitude = -(int_lon + (lon - int_lon)/0.6);
     }
-    ROS_DEBUG_STREAM(gpsData.longitude);
+    ROS_DEBUG_STREAM("Velodyne packet longitude:" << gpsData.longitude);
 
     last_gps_data_ = gpsData;
     new_gps_packet_ = true;
