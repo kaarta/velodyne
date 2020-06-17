@@ -39,8 +39,10 @@ namespace velodyne_rawdata
     // Shorthand typedefs for point cloud representations
   // typedef velodyne_pointcloud::PointXYZIR VPoint;
   typedef Kaarta::KaartaSensorPoint VPoint;
+  typedef velodyne_pointcloud::RawSensorPoint VPointRaw;
   // typedef pcl::PointCloud<VPoint> VPointCloud;
   typedef pcl::PointCloud<VPoint> VPointCloud;
+  typedef pcl::PointCloud<VPointRaw> VPointCloudRaw;
 
   /**
    * Raw Velodyne packet constants and structures.
@@ -170,10 +172,13 @@ namespace velodyne_rawdata
      */
     int setupOffline(std::string calibration_file, double max_range_, double min_range_);
 
+    void unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
     void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
     
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
+
+    velodyne_pointcloud::Calibration& getCalibrations(){ return calibration_;};
 
   private:
 
