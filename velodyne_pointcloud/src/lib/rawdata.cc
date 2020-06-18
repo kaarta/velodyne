@@ -905,7 +905,8 @@ namespace velodyne_rawdata
         }
 
         // point.ring = corrections.laser_ring;
-        point.ring = laser_number;
+        point.ring = corrections.laser_ring;
+        point.laser_num = laser_number;
         point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
         point.distance = tmp.uint;
         point.intensity = raw->blocks[block].data[k+2];
