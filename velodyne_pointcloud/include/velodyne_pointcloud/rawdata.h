@@ -173,6 +173,8 @@ namespace velodyne_rawdata
     int setupOffline(std::string calibration_file, double max_range_, double min_range_);
 
     void unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
+    void unpackRAW_vlp16(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
+    
     void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
     
     void setParameters(double min_range, double max_range, double view_direction,

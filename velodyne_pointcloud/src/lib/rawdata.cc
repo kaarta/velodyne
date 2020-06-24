@@ -829,11 +829,19 @@ namespace velodyne_rawdata
     /** special parsing for the VLP16 **/
     if (calibration_.num_lasers == 16)
     {
-      ROS_WARN("Raw unpacking not ready for 16 plane lasers");
-      // unpack_vlp16(pkt, data, scan_begin_stamp);
+      unpackRAW_vlp16(pkt, data, scan_begin_stamp);
       return;
     }
 
+    float full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
+    float single_firing = VLP32C_DSR_TOFFSET; // seconds
+    float block_duration = VLP32C_BLOCK_TDURATION;
+    if (laser_model == 2){
+      full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
+      single_firing = HDL32E_DSR_TOFFSET; // seconds
+      block_duration = HDL32E_BLOCK_TDURATION;
+    }
+    
     velodyne_rawdata::VPointRaw point;
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
 
@@ -851,15 +859,6 @@ namespace velodyne_rawdata
       }
 
       uint16_t block_azimuth = raw->blocks[block].rotation;
-
-      float full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
-      float single_firing = VLP32C_DSR_TOFFSET; // seconds
-      float block_duration = VLP32C_BLOCK_TDURATION;
-      if (laser_model == 2){
-        full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
-        single_firing = HDL32E_DSR_TOFFSET; // seconds
-        block_duration = HDL32E_BLOCK_TDURATION;
-      }
 
       int azimuth_diff = 0;
       if (block < (BLOCKS_PER_PACKET-1)){
@@ -904,7 +903,6 @@ namespace velodyne_rawdata
           azimuth_corrected = (azimuth_corrected + 9000) % 36000;
         }
 
-        // point.ring = corrections.laser_ring;
         point.ring = corrections.laser_ring;
         point.laser_num = laser_number;
         point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
@@ -915,6 +913,86 @@ namespace velodyne_rawdata
           point.time = timing_offsets[block][j] + time_diff_start_to_this_packet;
         }
         data->points.push_back(point);
+      }
+    }
+  }
+
+  void RawData::unpackRAW_vlp16(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& data, const ros::Time& scan_begin_stamp)
+  {
+    velodyne_rawdata::VPointRaw point;
+    
+    float last_azimuth_diff=0;
+    
+    float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
+    // ROS_WARN_STREAM("time diff scan to packet: " << time_diff_start_to_this_packet);
+
+    const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
+
+    for (int block = 0; block < BLOCKS_PER_PACKET; block++) {
+
+      // ignore packets with mangled or otherwise different contents
+      if (UPPER_BANK != raw->blocks[block].header) {
+        ROS_WARN_STREAM_THROTTLE(1, "skipping invalid VLP-16 packet: block "
+                                 << block << " header value is "
+                                 << raw->blocks[block].header);
+        return;                         // bad packet: skip the rest
+      }
+
+      float azimuth_diff;
+      int raw_azimuth_diff;
+
+      // Calculate difference between current and next block's azimuth angle.
+      if (block < (BLOCKS_PER_PACKET-1)){
+        raw_azimuth_diff = raw->blocks[block+1].rotation - raw->blocks[block].rotation;
+        azimuth_diff = (float)((36000 + raw_azimuth_diff)%36000);
+
+        // some packets contain an angle overflow where azimuth_diff < 0 
+        if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
+        {
+          ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block+1].rotation);
+          // if last_azimuth_diff was not zero, we can assume that the velodyne's speed did not change very much and use the same difference
+          if(last_azimuth_diff > 0){
+            azimuth_diff = last_azimuth_diff;
+          }
+          else{
+            continue;
+          }
+        }
+        last_azimuth_diff = azimuth_diff;
+      }else{
+        azimuth_diff = last_azimuth_diff;
+      }
+
+      for (int firing=0, k=0; firing < VLP16_FIRINGS_PER_BLOCK; firing++){
+        for (int dsr=0; dsr < VLP16_SCANS_PER_FIRING; dsr++, k+=RAW_SCAN_SIZE){
+          
+          velodyne_pointcloud::LaserCorrection &corrections = 
+            calibration_.laser_corrections[dsr];
+
+          /** Position Calculation */
+          union two_bytes tmp;
+          tmp.bytes[0] = raw->blocks[block].data[k];
+          tmp.bytes[1] = raw->blocks[block].data[k+1];
+
+          auto azimuth = raw->blocks[block].rotation;
+
+          /** correct for the laser rotation as a function of timing during the firings **/
+          float azimuth_corrected_f = azimuth + (azimuth_diff * ((dsr*VLP16_DSR_TOFFSET) + (firing*VLP16_FIRING_TOFFSET)) / VLP16_BLOCK_TDURATION);
+          // azimuth_corrected_f = azimuth + (azimuth_diff * time_offset);
+          int azimuth_corrected = (int)round(azimuth_corrected_f) % 36000;
+
+          // point.ring = corrections.laser_ring;
+          point.ring = corrections.laser_ring;
+          point.laser_num = dsr;
+          point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
+          point.distance = tmp.uint;
+          point.intensity = raw->blocks[block].data[k+2];
+          if (timing_offsets.size())
+          {
+            point.time = timing_offsets[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+          }
+          data->points.push_back(point);
+        }
       }
     }
   }
