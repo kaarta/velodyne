@@ -180,6 +180,8 @@ namespace velodyne_rawdata
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
 
+    std::string getCalibrationFilename(){ return config_.calibrationFile; };
+
     velodyne_pointcloud::Calibration& getCalibrations(){ return calibration_;};
 
   private:
