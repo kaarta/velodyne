@@ -385,12 +385,12 @@ namespace velodyne_driver
                && sender_address.sin_addr.s_addr != devip_.s_addr)
               continue;
             else{
-              pkt->stamp = parseInternalTime(&pkt->data[0] + 0x00F0-42, ros::Time::now());
-              pps_status_ = *((const uint8_t*)(&pkt->data[0]+0x00F4-42));
-              parseImuData(&pkt->data[0]+42);
+              pkt->stamp = parseInternalTime(&pkt->data[0] + 0xC6, ros::Time::now());
+              pps_status_ = *((const uint8_t*)(&(pkt->data[0]) + 0xCA));
+              parseImuData(&pkt->data[0]);
+              imu_data_.header.stamp = pkt->stamp;
 
-
-              std::string nmea_string((const char*)(&pkt->data[0]+0x00F4-42+4));
+              std::string nmea_string((const char*)(&pkt->data[0] + 0xCE));
 
               parseNmeaString(nmea_string.c_str());
 
@@ -519,11 +519,21 @@ namespace velodyne_driver
                 {
                   std::lock_guard<std::mutex> lock(position_data_mutex_);
                   memcpy(&(last_position_packet_.data[0]), pkt_data+42, sizeof(velodyne_msgs::VelodynePositionPacket().data));
-                  last_position_packet_.stamp = parseInternalTime( (uint8_t*)pkt_data+0x00F0, ros::Time(header->ts.tv_sec, header->ts.tv_usec));
-                  // ROS_WARN("%x %x %x %x - %x", pkt_data[0x00F0],pkt_data[0x00F1],pkt_data[0x00F2],pkt_data[0x00F3],pkt_data[0x00F4]);
-                  // ROS_INFO_STREAM("Got position packet time: "<<last_position_packet_.stamp);
-                  pps_status_ = *((const uint8_t*)(pkt_data+0x00F4-42));
-                  parseImuData(pkt_data+42);
+                  last_position_packet_.stamp = parseInternalTime( (uint8_t*)&last_position_packet_.data[0]+0xC6,
+                                                                  ros::Time(header->ts.tv_sec, header->ts.tv_usec));
+                  
+                  pps_status_ = *((const uint8_t*)(&last_position_packet_.data[0]+0xCA));
+                  parseImuData(&(last_position_packet_.data[0]));
+                  imu_data_.header.stamp = last_position_packet_.stamp;
+
+                  std::string nmea_string((const char*)(&(last_position_packet_.data[0])+0xCE));
+                  parseNmeaString(nmea_string.c_str());
+                  if (new_gps_packet_)
+                  {
+                    ROS_DEBUG("Velodyne NMEA string: %s", nmea_string.c_str());
+                    last_gps_data_.header.stamp = last_position_packet_.stamp;
+                  }
+
                   new_position_packet_ = true;
                 }
                 position_data_conditional_variable_.notify_one();
@@ -595,7 +605,7 @@ namespace velodyne_driver
 
     *pkt = last_position_packet_;
     pkt->stamp = pkt->stamp + ros::Duration(time_offset);
-    parseImuData(&last_position_packet_.data[0]);
+    // parseImuData(&last_position_packet_.data[0]);
     new_position_packet_ = false;
     return 0;
   }
@@ -604,7 +614,7 @@ namespace velodyne_driver
     std::string s(nmea_string);
     if (s.compare(last_nmea_sentence_) == 0){
       // identical packet. don't rebroadcast
-      ROS_DEBUG("Identical NMEA string received: %s", nmea_string);
+      // ROS_DEBUG("Identical NMEA string received: %s", nmea_string);
       return;
     }
     last_nmea_sentence_ = s;
@@ -634,7 +644,7 @@ namespace velodyne_driver
     }else{
       gpsData.latitude = - (int_lat+ (lat - int_lat)/0.6);
     }
-    ROS_DEBUG_STREAM(gpsData.latitude);
+    ROS_DEBUG_STREAM("Velodyne packet latitude:" << gpsData.latitude);
 
     //longitude
     float lon = strtof(tokens[5].c_str(), NULL)/100;
@@ -644,15 +654,15 @@ namespace velodyne_driver
     }else{
       gpsData.longitude = -(int_lon + (lon - int_lon)/0.6);
     }
-    ROS_DEBUG_STREAM(gpsData.longitude);
+    ROS_DEBUG_STREAM("Velodyne packet longitude:" << gpsData.longitude);
 
     last_gps_data_ = gpsData;
     new_gps_packet_ = true;
   }
 
   void Input::parseImuData(const uint8_t *b) {
-    sensor_msgs::Imu imuData;
-    imuData.orientation_covariance[0] = -1;
+    // sensor_msgs::Imu imuData;
+    imu_data_.orientation_covariance[0] = -1;
 
     double gyro1, accel1_x, accel1_y, gyro2, accel2_x, accel2_y, gyro3, accel3_x, accel3_y;
 
@@ -705,17 +715,17 @@ namespace velodyne_driver
       }
     }
 
-    imuData.linear_acceleration.x = (accel1_y - accel3_x) / 2;
-    imuData.linear_acceleration.y = (accel2_y + accel3_y) / 2;
-    imuData.linear_acceleration.z = (accel1_x + accel2_x) / 2;
+    imu_data_.linear_acceleration.x = (accel1_y - accel3_x) / 2;
+    imu_data_.linear_acceleration.y = (accel2_y + accel3_y) / 2;
+    imu_data_.linear_acceleration.z = (accel1_x + accel2_x) / 2;
 
-    imuData.angular_velocity.x = gyro2;
-    imuData.angular_velocity.y = -gyro1;
-    imuData.angular_velocity.z = gyro3;
+    imu_data_.angular_velocity.x = gyro2;
+    imu_data_.angular_velocity.y = -gyro1;
+    imu_data_.angular_velocity.z = gyro3;
 
-    // imuData.header.stamp = parseInternalTime(*(b + 198), *(b + 199), *(b + 200), *(b + 201));
-    imuData.header.stamp = ros::Time::now();
-    imuData.header.frame_id = "velodyne";
+    // imu_data_.header.stamp = parseInternalTime(*(b + 198), *(b + 199), *(b + 200), *(b + 201));
+    imu_data_.header.stamp = ros::Time::now();
+    imu_data_.header.frame_id = "velodyne";
   }
 
   ros::Time Input::parseInternalTime(uint8_t* bytes, ros::Time system_time) {

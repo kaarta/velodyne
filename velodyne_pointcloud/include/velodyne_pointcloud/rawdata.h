@@ -61,9 +61,21 @@ namespace velodyne_rawdata
   /** Special Defines for VLP16 support **/
   static const int    VLP16_FIRINGS_PER_BLOCK =   2;
   static const int    VLP16_SCANS_PER_FIRING  =  16;
-  static const float  VLP16_BLOCK_TDURATION   = 110.592f;   // [µs]
-  static const float  VLP16_DSR_TOFFSET       =   2.304f;   // [µs]
-  static const float  VLP16_FIRING_TOFFSET    =  55.296f;   // [µs]
+  static const float  VLP16_DSR_TOFFSET       =   2.304 * 1e-6;   // [µs]
+  static const float  VLP16_FIRING_TOFFSET    =  55.296 * 1e-6;   // [µs]
+  static const float  VLP16_BLOCK_TDURATION   = 2*VLP16_FIRING_TOFFSET;   // [µs]
+
+  static const int    VLP32C_FIRINGS_PER_BLOCK =   1;
+  static const int    VLP32C_SCANS_PER_FIRING  =  32;
+  static const float  VLP32C_DSR_TOFFSET       =   2.304 * 1e-6;   // [µs]
+  static const float  VLP32C_FIRING_TOFFSET    =  55.296 * 1e-6;   // [µs]
+  static const float  VLP32C_BLOCK_TDURATION   =  VLP32C_FIRING_TOFFSET;   // [µs]
+
+  static const int    HDL32E_FIRINGS_PER_BLOCK =   1;
+  static const int    HDL32E_SCANS_PER_FIRING  =  32;
+  static const float  HDL32E_DSR_TOFFSET       =   1.152 * 1e-6;   // [µs]
+  static const float  HDL32E_FIRING_TOFFSET    =  46.080 * 1e-6;   // [µs]
+  static const float  HDL32E_BLOCK_TDURATION   =  HDL32E_FIRING_TOFFSET;   // [µs]
   
 
   /** \brief Raw Velodyne data block.

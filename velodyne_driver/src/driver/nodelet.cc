@@ -74,6 +74,8 @@ void DriverNodelet::onInit()
   // start the driver
   dvr_.reset(new VelodyneDriver(getNodeHandle(), getPrivateNodeHandle()));
 
+  sleep(1); // wait for subscribers to be ready, mostly in the case of pcap reading
+
   if (dvr_->initSuccessful()){
     // spawn device poll thread
     running_ = true;

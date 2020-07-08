@@ -67,6 +67,7 @@ private:
   ros::Publisher output_;
   ros::Publisher position_packet_pub_;
   ros::Publisher gps_fix_pub_;
+  ros::Publisher imu_pub_;
   ros::Publisher rpm_pub_;
 
   /** diagnostics updater */
@@ -77,6 +78,8 @@ private:
   double diag_max_position_freq_;
   double diag_min_position_freq_;
   bool publish_position_packets_at_same_frequency_as_scans_;
+  bool publish_imu_;
+  ros::Time last_gps_data_stamp_;
   boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_topic_, diag_position_topic_;
   void produce_diagnostics(diagnostic_updater::DiagnosticStatusWrapper &stat);
   void setRPM(double frequency);        // set the RPM of the system
