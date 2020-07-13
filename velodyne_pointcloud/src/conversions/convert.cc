@@ -33,7 +33,6 @@ namespace velodyne_pointcloud
       return;
     }
 
-
     // advertise output point cloud (before subscribing to input data)
     output_ =
       node.advertise<sensor_msgs::PointCloud2>("velodyne_points", 10);
@@ -59,6 +58,22 @@ namespace velodyne_pointcloud
                                                               0.1, 5),
                                           TimeStampStatusParam(-1, 1)));
     diag_timer_ = private_nh.createTimer(ros::Duration(0.2), &Convert::diagTimerCallback,this);
+    
+    std::string serial_num;
+    if (private_nh.getParam("serial_number", serial_num))
+    {
+      if (serial_num.length() > 5 && serial_num.length() < 15)
+      {
+        // Figured out serial number. Try to configure data stream
+        std::stringstream ss;
+        ss << "~/.ros/" << serial_num <<"_velo_calibration.yaml";
+        data_->setCalibrationFilename(boost::filesystem::absolute(ss.str()).string());
+      }
+      else
+      {
+        ROS_ERROR_STREAM("Failed to get serial number for velodyne. Using default calibration for this model");
+      }
+    }
   }
   
   bool Convert::initSuccessful(){

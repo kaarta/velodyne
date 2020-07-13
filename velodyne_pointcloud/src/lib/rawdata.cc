@@ -91,37 +91,49 @@ namespace velodyne_rawdata
     
     // get path to angles.config file for this device
     config_.expected_factory_byte = (uint8_t) 0;
+    std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
     if (laser_model == 0){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/VLP16db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x22;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 1){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
       config_.expected_factory_byte = (uint8_t) 0x28;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 2){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/32db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x21;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 16){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
       config_.calibrationFile = pkgPath + "/params/64e_utexas.yaml";
       config_.expected_factory_byte = (uint8_t) 0;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else{
       // check calibration file
       res = false;
     }
+    if (config_.overrideCalibrationFile.length() > 0)
+    {
+      if (!boost::filesystem::exists(config_.overrideCalibrationFile))
+      // {
+      //   boost::system::error_code ec;
+      //   boost::filesystem::copy(config_.calibrationFile, config_.overrideCalibrationFile, ec);
+      //   if (ec.value())
+      //   {
+      //     ROS_ERROR("Failed to create a new file for override calibration file: %s from file %s", config_.overrideCalibrationFile.c_str(), config_.calibrationFile.c_str());
+      //   }
+      //   else
+      //   {
+      //     ROS_INFO("Created new calibration file: %s from file %s", config_.overrideCalibrationFile.c_str(), config_.calibrationFile.c_str());
+      //     config_.calibrationFile = config_.overrideCalibrationFile;
+      //   }
+        ROS_ERROR_STREAM("Failed to get velodyne calibration file: " << config_.overrideCalibrationFile <<" ... using default for this model");
+      // }
+      else
+        config_.calibrationFile = config_.overrideCalibrationFile;
+    }
+    ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     
-    ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
-
     calibration_.read(config_.calibrationFile);
     if (!calibration_.initialized) {
       ROS_ERROR_STREAM("Unable to open calibration file: " << 

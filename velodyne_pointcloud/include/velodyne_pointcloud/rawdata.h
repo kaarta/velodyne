@@ -175,11 +175,18 @@ namespace velodyne_rawdata
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
 
+
+    bool setCalibrationFilename(const std::string& override_file ){
+      config_.overrideCalibrationFile = override_file;
+      configureLaserParams(laser_model);
+    };
+
   private:
 
     /** configuration parameters */
     typedef struct {
       std::string calibrationFile;     ///< calibration file name
+      std::string overrideCalibrationFile; // override the calibration file. Always read from this file, even if we detect a different model
       double max_range;                ///< maximum range to publish
       double min_range;                ///< minimum range to publish
       int min_angle;                   ///< minimum angle to publish
