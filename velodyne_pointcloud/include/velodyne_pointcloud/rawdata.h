@@ -163,11 +163,6 @@ namespace velodyne_rawdata
                        double view_width);
 
 
-    bool setCalibrationFilename(const std::string& override_file ){
-      config_.calibrationFile = override_file;
-      configureLaserParams(laser_model);
-    };
-
   private:
 
     /** configuration parameters */
