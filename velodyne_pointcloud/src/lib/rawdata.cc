@@ -119,7 +119,7 @@ namespace velodyne_rawdata
       if (boost::filesystem::exists(config_.calibrationFile))
         calibToUse = config_.calibrationFile;
       else
-        ROS_ERROR("Calibration file does not exist: %s", config_.calibrationFile);
+        ROS_ERROR("Calibration file does not exist: %s", config_.calibrationFile.c_str());
         
       // if (!boost::filesystem::exists(config_.calibrationFile))
       // {
@@ -171,7 +171,7 @@ namespace velodyne_rawdata
     }
     if (!private_nh.getParam("calibration", config_.calibrationFile))
     {
-      ROS_ERROR("Failed to get a calibration file. Falling back to model specific calibration");
+      ROS_ERROR("Failed to read calibration file parameter. Falling back to model specific calibration");
       res = 1;
     }
     if (!configureLaserParams(laser_model)){
