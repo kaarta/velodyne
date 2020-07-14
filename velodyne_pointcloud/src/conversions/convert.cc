@@ -33,6 +33,7 @@ namespace velodyne_pointcloud
       return;
     }
 
+
     // advertise output point cloud (before subscribing to input data)
     output_ =
       node.advertise<sensor_msgs::PointCloud2>("velodyne_points", 10);
@@ -58,7 +59,6 @@ namespace velodyne_pointcloud
                                                               0.1, 5),
                                           TimeStampStatusParam(-1, 1)));
     diag_timer_ = private_nh.createTimer(ros::Duration(0.2), &Convert::diagTimerCallback,this);
-    
   }
   
   bool Convert::initSuccessful(){

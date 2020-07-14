@@ -162,7 +162,6 @@ namespace velodyne_rawdata
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
 
-
   private:
 
     /** configuration parameters */

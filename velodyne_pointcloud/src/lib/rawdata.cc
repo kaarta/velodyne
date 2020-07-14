@@ -121,22 +121,6 @@ namespace velodyne_rawdata
         calibToUse = config_.calibrationFile;
       else
         ROS_ERROR("Calibration file does not exist: %s", config_.calibrationFile.c_str());
-        
-      // if (!boost::filesystem::exists(config_.calibrationFile))
-      // {
-      //   boost::system::error_code ec;
-      //   boost::filesystem::copy(fallbackCalibrationFile, config_.calibrationFile, ec);
-      //   if (ec.value())
-      //   {
-      //     ROS_ERROR("Failed to create a new calibration file: %s from file %s", config_.calibrationFile.c_str(), fallbackCalibrationFile.c_str());
-      //   }
-      //   else
-      //   {
-      //     ROS_INFO("Created new calibration file: %s from file %s", config_.calibrationFile.c_str(), fallbackCalibrationFile.c_str());
-      //     config_.calibrationFile = config_.calibrationFile;
-      //   }
-      //   ROS_ERROR_STREAM("Failed to get velodyne calibration file: " << config_.calibrationFile <<" ... using default for this model");
-      // }
     }
     ROS_INFO("Setting calibration file to: %s", calibToUse.c_str());
     
