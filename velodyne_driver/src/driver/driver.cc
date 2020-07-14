@@ -37,6 +37,8 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   ROS_DEBUG_STREAM("Velodyne tf_prefix: " << tf_prefix);
   config_.frame_id = tf::resolve(tf_prefix, config_.frame_id);
 
+  dual_return_ = false;
+
   // get model name, validate string, determine packet rate
   private_nh.param("model", config_.model, std::string("64E"));
   std::string model_full_name;
@@ -110,9 +112,8 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   // set the frequency/packet count
   double frequency = (config_.rpm / 60.0);     // expected Hz rate
 
-  // default number of packets for each scan is a single revolution
-  // (fractions rounded up)
-  config_.npackets = (int) ceil(packet_rate / frequency);
+  updateNPackets();
+
   ROS_INFO_STREAM("publishing " << config_.npackets << " packets per scan");
 
   std::string dump_file;
@@ -213,6 +214,17 @@ bool VelodyneDriver::initSuccessful(){
   return init_success;
 }
 
+void VelodyneDriver::updateNPackets()
+{
+  double frequency = (config_.rpm / 60.0);     // expected Hz rate
+
+  // default number of packets for each scan is a single revolution
+  // (fractions rounded up)
+  config_.npackets = (int) ceil(packet_rate / frequency);
+  if (dual_return_)
+    config_.npackets *= 2;
+}
+
 void VelodyneDriver::setRPM(double rpm){
   if (rpm < 300){
     ROS_ERROR("Invalid RPM: %lf", rpm);
@@ -220,14 +232,14 @@ void VelodyneDriver::setRPM(double rpm){
   }
   double frequency = (rpm / 60.0);     // expected Hz rate
 
-  config_.npackets = (int) ceil(packet_rate / frequency);
+  config_.rpm = rpm;
+  updateNPackets();
 
   const double diag_freq = frequency;
   diag_max_freq_ = diag_freq;
   diag_min_freq_ = diag_freq;
   diag_max_position_freq_ = 14 * diag_freq;
   diag_min_position_freq_ = 14 * diag_freq;
-  config_.rpm = rpm;
 
   using namespace diagnostic_updater;
   diag_topic_.reset(new TopicDiagnostic("velodyne points", diagnostics_,
@@ -271,6 +283,13 @@ bool VelodyneDriver::poll(void)
 
       int azimuth = *( (u_int16_t*) (&tmp_packet.data[azimuth_data_pos]));
 
+      bool dual_mode = (tmp_packet.data[0x4b4] == 0x39);
+      if (dual_return_ != dual_mode)
+      {
+        dual_return_ = dual_mode;
+        updateNPackets();
+      }
+      
       // ROS_WARN("%d", (last_azimuth - azimuth));
 
       //if first packet in scan, there is no "valid" last_azimuth
@@ -300,6 +319,18 @@ bool VelodyneDriver::poll(void)
         {
           // keep reading until full packet received
           int rc = input_->getPacket(&scan->packets[i], config_.time_offset);
+    
+          if (scan->packets.size())
+          {
+            bool dual_mode = (scan->packets.back().data[0x4b4] == 0x39);
+            if (dual_return_ != dual_mode)
+            {
+              dual_return_ = dual_mode;
+              updateNPackets();
+              scan->packets.resize(config_.npackets);
+            }
+          }
+      
           if (rc == 1){
             continue; // position packet received
           }
