@@ -88,6 +88,9 @@ private:
   double last_rpm_;
 
   bool init_success;
+
+  bool dual_return_;
+  void updateNPackets();
 };
 
 } // namespace velodyne_driver
