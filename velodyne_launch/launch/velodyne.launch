@@ -26,7 +26,7 @@
         "VLP16"
   -->
   <arg name="model" default="VLP16" />
-  <arg name="calibration" default="$(find velodyne_pointcloud)/params/VLP16db.yaml"/>
+  <!-- <arg name="calibration" default="$(find velodyne_pointcloud)/params/VLP16db.yaml"/> -->
 
   <!-- start nodelet manager and driver nodelets -->
   <include file="$(find velodyne_driver)/launch/nodelet_manager.launch">
@@ -46,7 +46,7 @@
 
   <!-- start cloud nodelet -->
   <include file="$(find velodyne_pointcloud)/launch/cloud_nodelet.launch">
-    <arg name="calibration" value="$(arg calibration)"/>
+    <!-- <arg name="calibration" value="$(arg calibration)"/> -->
     <arg name="manager" value="$(arg manager)" />
     <arg name="max_range" value="$(arg max_range)"/>
     <arg name="min_range" value="$(arg min_range)"/>

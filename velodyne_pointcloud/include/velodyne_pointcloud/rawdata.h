@@ -157,19 +157,6 @@ namespace velodyne_rawdata
      */
     bool configureLaserParams(int laser_model, bool dual_mode, bool override = false);
 
-    /** \brief Set up for data processing offline. 
-      * Performs the same initialization as in setup, in the abscence of a ros::NodeHandle.
-      * this method is useful if unpacking data directly from bag files, without passing 
-      * through a communication overhead.
-      * 
-      * @param calibration_file path to the calibration file
-      * @param max_range_ cutoff for maximum range
-      * @param min_range_ cutoff for minimum range
-      * @returns 0 if successful;
-      *           errno value for failure
-     */
-    int setupOffline(std::string calibration_file, double max_range_, double min_range_);
-
     void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
     
     void setParameters(double min_range, double max_range, double view_direction,

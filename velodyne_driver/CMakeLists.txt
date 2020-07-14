@@ -42,6 +42,14 @@ install(DIRECTORY launch/
 install(PROGRAMS src/vdump
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
+install(DIRECTORY scripts/
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}/scripts
+        PATTERN "scripts/*"
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        GROUP_EXECUTE GROUP_READ
+        WORLD_EXECUTE WORLD_READ
+)
+
 if (CATKIN_ENABLE_TESTING)
 
   # these dependencies are only needed for unit testing

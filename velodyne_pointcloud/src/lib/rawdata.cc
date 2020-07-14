@@ -92,41 +92,42 @@ namespace velodyne_rawdata
     // get path to angles.config file for this device
     config_.dual_return_mode = dual_mode;
     config_.expected_factory_byte = (uint8_t) 0;
+    std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
+    std::string fallbackCalibrationFile;
     if (laser_model == 0){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
-      config_.calibrationFile = pkgPath + "/params/VLP16db.yaml";
+      fallbackCalibrationFile = pkgPath + "/params/VLP16db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x22;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 1){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
-      config_.calibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
+      fallbackCalibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
       config_.expected_factory_byte = (uint8_t) 0x28;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 2){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
-      config_.calibrationFile = pkgPath + "/params/32db.yaml";
+      fallbackCalibrationFile = pkgPath + "/params/32db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x21;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else if (laser_model == 16){
-      std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
-      config_.calibrationFile = pkgPath + "/params/64e_utexas.yaml";
+      fallbackCalibrationFile = pkgPath + "/params/64e_utexas.yaml";
       config_.expected_factory_byte = (uint8_t) 0;
-      ROS_INFO("Setting calibration file to: %s", config_.calibrationFile.c_str());
     }
     else{
       // check calibration file
       res = false;
     }
+    std::string calibToUse = fallbackCalibrationFile;
+    if (config_.calibrationFile.length() > 0)
+    {
+      if (boost::filesystem::exists(config_.calibrationFile))
+        calibToUse = config_.calibrationFile;
+      else
+        ROS_ERROR("Calibration file does not exist: %s", config_.calibrationFile.c_str());
+    }
+    ROS_INFO("Setting calibration file to: %s", calibToUse.c_str());
     
-    ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
-
-    calibration_.read(config_.calibrationFile);
+    calibration_.read(calibToUse);
     if (!calibration_.initialized) {
       ROS_ERROR_STREAM("Unable to open calibration file: " << 
-          config_.calibrationFile);
+          calibToUse);
       res = false;
     }
 
@@ -146,19 +147,20 @@ namespace velodyne_rawdata
   /** Set up for on-line operation. */
   int RawData::setup(ros::NodeHandle private_nh)
   {
-    ROS_INFO("Velodyne rawdata setup");
+    int res = 0;
     // set laser parameters
     laser_model = 0;
-    private_nh.getParam("/laser_model", laser_model);
+    if (!private_nh.getParam("/laser_model", laser_model))
+    {
+      ROS_ERROR("No laser model parameter set. Using: %d", laser_model);
+    }
+    if (!private_nh.getParam("calibration", config_.calibrationFile))
+    {
+      ROS_ERROR("Failed to read calibration file parameter. Falling back to model specific calibration");
+      res = 1;
+    }
     if (!configureLaserParams(laser_model, false)){
-      if (!private_nh.getParam("calibration", config_.calibrationFile))
-      {
-        ROS_ERROR("No calibration angles specified! Using test values!");
-
-        // have to use something: grab unit test version as a default
-        std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
-        config_.calibrationFile = pkgPath + "/params/64e_utexas.yaml";
-      }
+      res = 2;
     }
 
     if (!private_nh.getParam("upward", upward))
@@ -169,8 +171,7 @@ namespace velodyne_rawdata
       upward = true;
     }
 
-
-    return 0;
+    return res;
   }
 
 
@@ -269,39 +270,6 @@ namespace velodyne_rawdata
       return false;
     }
     return true;
-  }
-
-  /** Set up for offline operation */
-  int RawData::setupOffline(std::string calibration_file, double max_range_, double min_range_)
-  {
-      config_.max_range = max_range_;
-      config_.min_range = min_range_;
-      ROS_INFO_STREAM("data ranges to publish: ["
-          << config_.min_range << ", "
-          << config_.max_range << "]");
-
-      config_.calibrationFile = calibration_file;
-
-      ROS_INFO_STREAM("correction angles: " << config_.calibrationFile);
-
-      calibration_.read(config_.calibrationFile);
-      if (!calibration_.initialized) {
-        ROS_ERROR_STREAM("Unable to open calibration file: " <<
-            config_.calibrationFile);
-        return -1;
-      }
-
-      ROS_INFO_STREAM("Number of lasers: " << calibration_.num_lasers << ". Dual return = " << config_.dual_return_mode);
-      buildTimings();
-
-      // Set up cached values for sin and cos of all the possible headings
-      for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
-        double rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
-        cos_rot_table_[rot_index] = cos(rotation);
-        sin_rot_table_[rot_index] = sin(rotation);
-      }
-      
-      return 0;
   }
 
   /** @brief convert raw packet to point cloud
