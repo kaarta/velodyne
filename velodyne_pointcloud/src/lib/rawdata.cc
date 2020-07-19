@@ -621,11 +621,16 @@ namespace velodyne_rawdata
 
           /** Position Calculation */
           union two_bytes tmp;
+          float point_time;
+
+          intensity = raw->blocks[block].data[k+2];
           tmp.bytes[0] = raw->blocks[block].data[k];
           tmp.bytes[1] = raw->blocks[block].data[k+1];
-          intensity = raw->blocks[block].data[k+2];
+
           if (config_.dual_return_mode)
           {
+            point_time = timing_offsets[block][dsr] + time_diff_start_to_this_packet;
+
             // in dual return mode, the packets are in the order of Last (even blocks), Strongest/Second strongest (odd blocks)
             // If the second data block's return has a greater intensity than the first (ie last != strongest)
             if (raw->blocks[block].data[k+2] < raw->blocks[block + 1].data[k+2])
@@ -635,19 +640,12 @@ namespace velodyne_rawdata
               tmp.bytes[1] = raw->blocks[block + 1].data[k+1];
             }
           }
-
-          float point_time;
-          if (config_.dual_return_mode){
-            point_time = timing_offsets[block][dsr] + time_diff_start_to_this_packet;
-            /** correct for the laser rotation as a function of timing during the firings **/
-            // azimuth_corrected_f = azimuth + (azimuth_diff * (( (dsr/2)*VLP16_DSR_TOFFSET) + (firing*VLP16_FIRING_TOFFSET)) / block_duration);
-          }
           else{
             point_time = timing_offsets[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
-            /** correct for the laser rotation as a function of timing during the firings **/
-            // azimuth_corrected_f = azimuth + (azimuth_diff * ((dsr*VLP16_DSR_TOFFSET) + (firing*VLP16_FIRING_TOFFSET)) / block_duration);
           }
 
+          /** correct for the laser rotation as a function of timing during the firings **/
+          azimuth_corrected_f = azimuth + (azimuth_diff * ((dsr*VLP16_DSR_TOFFSET) + (firing*VLP16_FIRING_TOFFSET)) / VLP16_BLOCK_TDURATION);
           // azimuth_corrected_f = azimuth + (azimuth_diff * time_offset);
           azimuth_corrected = ((int)round(azimuth_corrected_f)) % 36000;
           
