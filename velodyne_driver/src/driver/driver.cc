@@ -204,7 +204,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
     position_packet_pub_ =
       node.advertise<velodyne_msgs::VelodynePositionPacket>("velodyne_position_packets", 10);
     gps_fix_pub_ =
-      node.advertise<sensor_msgs::NavSatFix>("velodyne_gps_fix", 10);
+      node.advertise<sensor_msgs::NavSatFix>("velodyne_gnss_fix", 10);
     imu_pub_ = 
       node.advertise<sensor_msgs::Imu>("velodyne_imu", 10);
   }
@@ -366,14 +366,8 @@ bool VelodyneDriver::poll(void)
 
   if(publish_position_packets_at_same_frequency_as_scans_){
     velodyne_msgs::VelodynePositionPacket position_packet = input_->getPositionPacket();
-    sensor_msgs::NavSatFix gps_data_;
 
     position_packet_pub_.publish(position_packet);
-
-    // if we have new gps data, publish it
-    // if ( input_->pollGPSData(&gps_data_) ){
-    //   gps_fix_pub_.publish(gps_data_);
-    // }
 
     // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
     diag_position_topic_->tick(position_packet.stamp);
