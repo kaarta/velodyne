@@ -48,15 +48,15 @@ namespace velodyne_pointcloud
      */
     void parseImuData(const uint8_t *b, sensor_msgs::Imu& imu_data);
     
-    // void parseNmeaString(const char * nmea_string);
+    void parseNmeaString(const char * nmea_string, sensor_msgs::NavSatFix& nav_sat_fix);
 
-    
     ros::Subscriber velodyne_packet_sub_;
-    ros::Publisher  imu_output_pub_;
-    ros::Publisher  gnss_raw_output_pub_;
+    ros::Publisher  imu_output_pub_, gnss_raw_output_pub_, gnss_fix_output_pub_;
 
     sensor_msgs::Imu::Ptr imu_data_;
     stencil_msgs::GPS_NMEA_Stamped::Ptr gnss_raw_data_;
+    sensor_msgs::NavSatFix::Ptr gnss_fix_data_;
+
     std::string imu_frame_id_, gnss_frame_id_;
 
     ros::NodeHandle private_nh_;

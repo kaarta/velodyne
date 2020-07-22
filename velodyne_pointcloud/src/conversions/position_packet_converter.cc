@@ -31,7 +31,9 @@ namespace velodyne_pointcloud
 
     imu_data_.reset(new sensor_msgs::Imu());
     gnss_raw_data_.reset(new stencil_msgs::GPS_NMEA_Stamped());
+    gnss_fix_data_.reset(new sensor_msgs::NavSatFix());
 
+    gnss_fix_data_->header.frame_id = gnss_frame_id_;
     imu_data_->header.frame_id=imu_frame_id_;
     gnss_raw_data_->header.frame_id = gnss_frame_id_;
 
@@ -40,6 +42,8 @@ namespace velodyne_pointcloud
       node.advertise<sensor_msgs::Imu>("velodyne_imu", 10);
     gnss_raw_output_pub_ =
       node.advertise<stencil_msgs::GPS_NMEA_Stamped>("velodyne_gnss_raw", 10);
+    gnss_fix_output_pub_ =
+      node.advertise<sensor_msgs::NavSatFix>("velodyne_gnss_fix", 10);
 
     // subscribe to VelodyneScan packets
     velodyne_packet_sub_ =
@@ -55,7 +59,7 @@ namespace velodyne_pointcloud
   /** @brief Callback for raw scan messages. */
   void PositionPacketConverter::processPacket(const velodyne_msgs::VelodynePositionPacket::ConstPtr &pkt)
   {
-    if (imu_output_pub_.getNumSubscribers() == 0 && gnss_raw_output_pub_.getNumSubscribers() == 0)
+    if (imu_output_pub_.getNumSubscribers() == 0 && gnss_raw_output_pub_.getNumSubscribers() == 0 && gnss_fix_output_pub_.getNumSubscribers() == 0)
       return;
 
     private_nh_.getParamCached("/laser_model", laser_model_);
@@ -74,61 +78,56 @@ namespace velodyne_pointcloud
 
     if (nmea_string != gnss_raw_data_->sentence)
     {
+      parseNmeaString(nmea_string.c_str(), *gnss_fix_data_);
+      gnss_fix_data_->header.stamp = pkt->stamp;
+      gnss_fix_data_->status.status = 1;
+      gnss_fix_output_pub_.publish(gnss_fix_data_);
+
       gnss_raw_data_->sentence = nmea_string;
       gnss_raw_data_->header.stamp = pkt->stamp;
       gnss_raw_output_pub_.publish(gnss_raw_data_);
     }
   }
 
-  // void PositionPacketConverter::parseNmeaString(const char * nmea_string){
-  //   std::string s(nmea_string);
-  //   if (s.compare(last_nmea_sentence_) == 0){
-  //     // identical packet. don't rebroadcast
-  //     // ROS_DEBUG("Identical NMEA string received: %s", nmea_string);
-  //     return;
-  //   }
-  //   last_nmea_sentence_ = s;
+  void PositionPacketConverter::parseNmeaString(const char * nmea_string, sensor_msgs::NavSatFix& nav_sat_fix){
+    std::string s(nmea_string);
 
-  //   std::string tokens[13];
-  //   std::string delimiter = ",";
-  //   size_t pos;
-  //   int i =0;
-  //   while ((pos = s.find(delimiter)) != std::string::npos) {
-  //     tokens[i++] = s.substr(0, pos);
-  //     s.erase(0, pos + delimiter.length());
-  //   }
-  //   sensor_msgs::NavSatFix gpsData;
+    std::string tokens[13];
+    std::string delimiter = ",";
+    size_t pos;
+    int i =0;
+    while ((pos = s.find(delimiter)) != std::string::npos) {
+      tokens[i++] = s.substr(0, pos);
+      s.erase(0, pos + delimiter.length());
+    }
 
-  //   gpsData.header.stamp = ros::Time::now();
-  //   gpsData.header.frame_id="gps";
-  //   gpsData.altitude = 0.0;
-  //   gpsData.position_covariance_type = 0; //COVARIANCE_TYPE_UNKNOWN;
-  //   gpsData.status.status = 0; //STATUS_FIX;
-  //   gpsData.status.service = 1; //SERVICE_GPS;
+    nav_sat_fix.altitude = 0.0;
+    nav_sat_fix.position_covariance_type = 0; //COVARIANCE_TYPE_UNKNOWN;
+    nav_sat_fix.status.status = 0; //STATUS_FIX;
+    nav_sat_fix.status.service = 1; //SERVICE_GPS;
 
-  //   //latitude;
-  //   float lat = strtof(tokens[3].c_str(), NULL)/100;
-  //   float int_lat = floor(lat);
-  //   if(tokens[4]=="N"){
-  //     gpsData.latitude = int_lat+ (lat - int_lat)/0.6;
-  //   }else{
-  //     gpsData.latitude = - (int_lat+ (lat - int_lat)/0.6);
-  //   }
-  //   ROS_DEBUG_STREAM("Velodyne packet latitude:" << gpsData.latitude);
+    //latitude;
+    float lat = strtof(tokens[3].c_str(), NULL)/100;
+    float int_lat = floor(lat);
+    if(tokens[4]=="N"){
+      nav_sat_fix.latitude = int_lat+ (lat - int_lat)/0.6;
+    }else{
+      nav_sat_fix.latitude = - (int_lat+ (lat - int_lat)/0.6);
+    }
+    
+    ROS_DEBUG_STREAM("Velodyne packet latitude:" << nav_sat_fix.latitude);
 
-  //   //longitude
-  //   float lon = strtof(tokens[5].c_str(), NULL)/100;
-  //   float int_lon = floor(lon);
-  //   if(tokens[6]=="E"){
-  //     gpsData.longitude = int_lon + (lon - int_lon)/0.6;
-  //   }else{
-  //     gpsData.longitude = -(int_lon + (lon - int_lon)/0.6);
-  //   }
-  //   ROS_DEBUG_STREAM("Velodyne packet longitude:" << gpsData.longitude);
+    //longitude
+    float lon = strtof(tokens[5].c_str(), NULL)/100;
+    float int_lon = floor(lon);
+    if(tokens[6]=="E"){
+      nav_sat_fix.longitude = int_lon + (lon - int_lon)/0.6;
+    }else{
+      nav_sat_fix.longitude = -(int_lon + (lon - int_lon)/0.6);
+    }
 
-  //   last_gps_data_ = gpsData;
-  //   new_gps_packet_ = true;
-  // }
+    ROS_DEBUG_STREAM("Velodyne packet longitude:" << nav_sat_fix.longitude);
+  }
 
   void PositionPacketConverter::parseImuData(const uint8_t *b, sensor_msgs::Imu& imu_data)
   {
