@@ -432,6 +432,7 @@ namespace velodyne_driver
                        bool read_once, bool read_fast, double repeat_delay):
     Input(private_nh, port, position_port),
     packet_rate_(packet_rate),
+    new_position_packet_(false),
     filename_(filename)
   {
     pcap_ = NULL;  
