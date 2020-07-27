@@ -257,13 +257,16 @@ namespace velodyne_rawdata
     }
 
     if (timing_offsets.size()){
+      std::stringstream ss;
       // ROS_INFO("VELODYNE TIMING TABLE:");
       for (size_t x = 0; x < timing_offsets.size(); ++x){
         for (size_t y = 0; y < timing_offsets[x].size(); ++y){
-          printf("%04.3f ", timing_offsets[x][y] * 1e6);
+          // printf("%04.3f ", timing_offsets[x][y] * 1e6);
+          ss << std::fixed << std::setw(7) << std::setprecision(3) << timing_offsets[x][y] * 1e6 << " " ;
         }
-        printf("\n");
+        ss << std::endl;
       }
+      ROS_DEBUG("Timings:\n%s", ss.str().c_str());
     }
     else{
       ROS_WARN("NO TIMING OFFSETS CALCULATED. ARE YOU USING A SUPPORTED VELODYNE SENSOR?");
@@ -281,7 +284,7 @@ namespace velodyne_rawdata
   {
     // ROS_WARN_STREAM("Received packet, time: " << pkt.stamp <<" scan begin time = "<<scan_begin_stamp << "diff = " << (scan_begin_stamp - pkt.stamp));
 
-    bool pkt_dual_mode = false;
+    bool pkt_dual_mode = pkt.data[0x4b4] == 0x39;
     if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
       switch(pkt.data[0x4b4])
       {
