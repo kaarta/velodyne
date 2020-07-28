@@ -150,6 +150,9 @@ namespace velodyne_rawdata
      */
     int setup(ros::NodeHandle private_nh);
 
+    int setupOffline(int _model, std::string _calibration, bool _upward);
+    bool offline_setup;
+
     /** \brief set up the laser configuration files using an integer laser model
      * @param laser_model
      *   0 = VLP16

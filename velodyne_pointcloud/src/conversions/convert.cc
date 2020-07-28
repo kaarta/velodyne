@@ -18,6 +18,44 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <clay_lib/time_profiler.h>
+
+inline velodyne_rawdata::VPoint convertRawPointToXYZ(const velodyne_rawdata::VPointRaw& point, const velodyne_pointcloud::LaserCorrection& param)
+{
+  velodyne_rawdata::VPoint vpoint;
+
+  auto dist_part = (param.distance_scale_m * point.distance + param.dist_correction) * param.cos_vert_correction;
+  auto sin_point_azi = sin(point.azimuth);
+  auto cos_point_azi = cos(point.azimuth);
+  auto cos_horizontal_rot_correction = param.cos_rot_correction;
+  auto sin_horizontal_rot_correction = param.sin_rot_correction;
+
+  vpoint.x = dist_part * 
+            ( sin_point_azi*cos_horizontal_rot_correction - cos_point_azi*sin_horizontal_rot_correction )
+            - param.horiz_offset_correction * (cos_point_azi*cos_horizontal_rot_correction + sin_point_azi*sin_horizontal_rot_correction);
+
+  vpoint.y = dist_part * 
+            ( cos_point_azi*cos_horizontal_rot_correction + sin_point_azi*sin_horizontal_rot_correction )
+            + param.horiz_offset_correction * (sin_point_azi*cos_horizontal_rot_correction - cos_point_azi*sin_horizontal_rot_correction);
+
+  vpoint.z = (param.distance_scale_m * point.distance + param.dist_correction) * param.sin_vert_correction + param.vert_offset_correction;
+  
+  auto x_coord = vpoint.y;
+  auto y_coord = -vpoint.x;
+  auto z_coord = vpoint.z;
+
+  vpoint.x = x_coord;
+  vpoint.y = y_coord;
+  vpoint.z = z_coord;
+
+  vpoint.azimuth = point.azimuth;
+  vpoint.intensity = point.intensity;
+  vpoint.time = point.time;
+  vpoint.distance = param.distance_scale_m * point.distance + param.dist_correction;
+  vpoint.ring = point.ring;
+  return vpoint;
+}
+
 namespace velodyne_pointcloud
 {
   using namespace diagnostic_updater;
@@ -26,6 +64,8 @@ namespace velodyne_pointcloud
     data_(new velodyne_rawdata::RawData()),
     init_success(true)
   {
+    rawCloud.reset(new velodyne_rawdata::VPointCloudRaw());
+
     int result = data_->setup(private_nh);
 
     if (result < 0){
@@ -79,17 +119,35 @@ namespace velodyne_pointcloud
     if (output_.getNumSubscribers() == 0)         // no one listening?
       return;                                     // avoid much work
 
+    TIME_THIS_SCOPE(velo_raw_data_process_scan);
+
     outMsg.pc->points.clear();
     // outMsg's header is a pcl::PCLHeader, convert it before stamp assignment
     outMsg.pc->header.stamp = pcl_conversions::toPCL(scanMsg->header).stamp;
     outMsg.pc->header.frame_id = scanMsg->header.frame_id;
     outMsg.pc->height = 1;
 
+    rawCloud->points.clear();
+    // outMsg's header is a pcl::PCLHeader, convert it before stamp assignment
+    rawCloud->header = outMsg.pc->header;
+
     // process each packet provided by the driver
     for (size_t i = 0; i < scanMsg->packets.size(); ++i)
     {
-      data_->unpack(scanMsg->packets[i], outMsg, scanMsg->header.stamp);
+      data_->unpackRAW(scanMsg->packets[i], rawCloud, scanMsg->header.stamp);
     }
+
+    auto laser_corrections = data_->getCalibrations().laser_corrections;
+
+    outMsg.pc->points.resize(rawCloud->points.size());
+
+    int i=0;
+    for (auto pt : rawCloud->points)
+    {
+      outMsg.pc->points[i] = convertRawPointToXYZ(pt, laser_corrections[pt.laser_num]);
+      ++i;
+    }
+    outMsg.finalize();
 
     // publish the accumulated cloud message
     ROS_DEBUG_STREAM("Publishing " << outMsg.pc->height * outMsg.pc->width

@@ -43,8 +43,10 @@ namespace velodyne_rawdata
   //
   ////////////////////////////////////////////////////////////////////////
 
-  RawData::RawData() {
-    last_azimuth_diff=20;
+  RawData::RawData() : 
+    last_azimuth_diff(20),
+    offline_setup(false)
+  {
   }
   
   /** Update parameters: conversions and update */
@@ -82,13 +84,16 @@ namespace velodyne_rawdata
     laser_model = laser_model_;
 
     if (override){
-      // set the parameter and log the change
-      Kaarta::ScanInfoManagerROSClient client;
-      if (client.init(true)){
-        client.publishFormatStr("/adjusted_laser_model", "true");
-        client.publishFormatStr("/laser_model", "%d", laser_model);
+      if (!offline_setup)
+      {
+        // set the parameter and log the change
+        Kaarta::ScanInfoManagerROSClient client;
+        if (client.init(true)){
+          client.publishFormatStr("/adjusted_laser_model", "true");
+          client.publishFormatStr("/laser_model", "%d", laser_model);
+        }
+        ros::param::set("/laser_model", laser_model);
       }
-      ros::param::set("/laser_model", laser_model);
     }
     
     // get path to angles.config file for this device
@@ -152,6 +157,7 @@ namespace velodyne_rawdata
   /** Set up for on-line operation. */
   int RawData::setup(ros::NodeHandle private_nh)
   {
+    offline_setup = false;
     int res = 0;
     // set laser parameters
     laser_model = 0;
@@ -174,6 +180,24 @@ namespace velodyne_rawdata
 
       // use default upward mounting direction
       upward = true;
+    }
+
+    return res;
+  }
+
+  /** Set up for ROS operation. */
+  int RawData::setupOffline(int _model, std::string _calibration, bool _upward)
+  {
+    offline_setup = true;
+
+    int res = 0;
+    // set laser parameters
+    laser_model = _model;
+    config_.calibrationFile = _calibration;
+    upward = _upward;
+
+    if (!configureLaserParams(laser_model, false)){
+      res = 2;
     }
 
     return res;
@@ -430,7 +454,7 @@ namespace velodyne_rawdata
              ||(config_.min_angle > config_.max_angle 
              && (azimuth_corrected <= config_.max_angle 
              || azimuth_corrected >= config_.min_angle))){
-          float distance = tmp.uint * calibration_.distance_resolution_m;
+          float distance = tmp.uint * corrections.distance_scale_m;
 
           // skip zero distance (invalid) points
           if (distance < 0.1){
@@ -665,7 +689,7 @@ namespace velodyne_rawdata
                || azimuth_corrected >= config_.min_angle))){
 
             // convert polar coordinates to Euclidean XYZ
-            float distance = tmp.uint * calibration_.distance_resolution_m;
+            float distance = tmp.uint * corrections.distance_scale_m;
 
             // skip zero distance (invalid) points
 
