@@ -43,7 +43,9 @@ namespace velodyne_rawdata
   //
   ////////////////////////////////////////////////////////////////////////
 
-  RawData::RawData() {}
+  RawData::RawData() {
+    last_azimuth_diff=20;
+  }
   
   /** Update parameters: conversions and update */
   void RawData::setParameters(double min_range,
@@ -76,7 +78,7 @@ namespace velodyne_rawdata
 
   bool RawData::configureLaserParams(int laser_model_, bool dual_mode, bool override){
     bool res = true;
-    ROS_INFO("Configuring laser_model to: %d", laser_model_);
+    ROS_INFO("Configuring laser_model to: %d. Dual mode: %d. Override = %d", laser_model_, dual_mode, override);
     laser_model = laser_model_;
 
     if (override){
@@ -95,14 +97,17 @@ namespace velodyne_rawdata
     std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
     std::string fallbackCalibrationFile;
     if (laser_model == 0){
+      ROS_INFO("Setting up a VLP16 driver");
       fallbackCalibrationFile = pkgPath + "/params/VLP16db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x22;
     }
     else if (laser_model == 1){
+      ROS_INFO("Setting up a VLP32 driver");
       fallbackCalibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
       config_.expected_factory_byte = (uint8_t) 0x28;
     }
     else if (laser_model == 2){
+      ROS_INFO("Setting up an HDL32 driver");
       fallbackCalibrationFile = pkgPath + "/params/32db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x21;
     }
@@ -293,7 +298,6 @@ namespace velodyne_rawdata
           break;
         case 0x39:
           ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (dual)", pkt.data[0x4b4]);
-          pkt_dual_mode = true;
           break;
         default:
           ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (unknown)", pkt.data[0x4b4]);
@@ -306,15 +310,15 @@ namespace velodyne_rawdata
       ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
       switch(pkt.data[0x4b5]){
         case 0x22:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: ");
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: %d", pkt_dual_mode);
           configureLaserParams(0, pkt_dual_mode, true);
           break;
         case 0x28:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1");
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1 with dual return mode: %d", pkt_dual_mode);
           configureLaserParams(1, pkt_dual_mode, true);
           break;
         case 0x21:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2");
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2 with dual return mode: %d", pkt_dual_mode);
           configureLaserParams(2, pkt_dual_mode, true);
           break;
         default:
@@ -334,7 +338,6 @@ namespace velodyne_rawdata
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
 
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
-    static int last_azimuth_diff = 20; // TODO: default to 600 RPM assumption
 
     int block_jump = config_.dual_return_mode ? 2 : 1;
     for (int block = 0; block < BLOCKS_PER_PACKET; block += block_jump) {
@@ -793,28 +796,8 @@ namespace velodyne_rawdata
   void RawData::unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& data, const ros::Time& scan_begin_stamp)
   {
     // ROS_WARN_STREAM("Received packet, time: " << pkt.stamp <<" scan begin time = "<<scan_begin_stamp << "diff = " << (scan_begin_stamp - pkt.stamp));
-
-    if (pkt.data[0x4b5] != config_.expected_factory_byte){
-      ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
-      switch(pkt.data[0x4b5]){
-        case 0x22:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0");
-          configureLaserParams(0, true);
-          break;
-        case 0x28:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1");
-          configureLaserParams(1, true);
-          break;
-        case 0x21:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2");
-          configureLaserParams(2, true);
-          break;
-        default:
-          ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
-          exit(1);
-      }
-    }
-
+    
+    bool pkt_dual_mode = pkt.data[0x4b4] == 0x39;
     if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
       switch(pkt.data[0x4b4])
       {
@@ -827,6 +810,28 @@ namespace velodyne_rawdata
         default:
           ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (unknown)", pkt.data[0x4b4]);
           break;
+      }
+    }
+    
+    if (pkt.data[0x4b5] != config_.expected_factory_byte || pkt_dual_mode != config_.dual_return_mode){
+      ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
+      ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
+      switch(pkt.data[0x4b5]){
+        case 0x22:
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: %d", pkt_dual_mode);
+          configureLaserParams(0, pkt_dual_mode, true);
+          break;
+        case 0x28:
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1 with dual return mode: %d", pkt_dual_mode);
+          configureLaserParams(1, pkt_dual_mode, true);
+          break;
+        case 0x21:
+          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2 with dual return mode: %d", pkt_dual_mode);
+          configureLaserParams(2, pkt_dual_mode, true);
+          break;
+        default:
+          ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
+          exit(1);
       }
     }
 

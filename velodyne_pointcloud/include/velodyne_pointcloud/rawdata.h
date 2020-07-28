@@ -211,6 +211,8 @@ namespace velodyne_rawdata
               && range <= config_.max_range);
     }
 
+    int last_azimuth_diff;
+
     std::vector<std::vector<float> > timing_offsets;
     int laser_model;
   };
