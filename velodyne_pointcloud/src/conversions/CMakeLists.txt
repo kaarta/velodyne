@@ -1,11 +1,11 @@
-add_executable(cloud_node cloud_node.cc convert.cc pointcloudXYZIADRT.cc)
+add_executable(cloud_node cloud_node.cc convert.cc position_packet_converter.cc pointcloudXYZIADRT.cc)
 add_dependencies(cloud_node ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(cloud_node velodyne_rawdata
                       ${catkin_LIBRARIES} ${YAML_CPP_LIBRARIES})
 install(TARGETS cloud_node
         RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
-add_library(cloud_nodelet cloud_nodelet.cc convert.cc pointcloudXYZIADRT.cc)
+add_library(cloud_nodelet cloud_nodelet.cc convert.cc position_packet_converter.cc pointcloudXYZIADRT.cc)
 add_dependencies(cloud_nodelet ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(cloud_nodelet velodyne_rawdata
                       ${catkin_LIBRARIES} ${YAML_CPP_LIBRARIES})

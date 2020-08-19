@@ -63,10 +63,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
     ROS_INFO("Setting model to: %s", model_full_name.c_str());
   }
   else{
-    ROS_ERROR("Could not identify /laser_model parameter: %d. Driver config failed", laser_model);
-
-    init_success = false;
-    return;
+    ROS_ERROR("Could not identify /laser_model parameter: %d. Initial driver configuration failed", laser_model);
 
     if ((config_.model == "64E_S2") || 
         (config_.model == "64E_S2.1"))    // generates 1333312 points per second
@@ -97,7 +94,10 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
     else
     {
         ROS_ERROR_STREAM("unknown Velodyne LIDAR model: " << config_.model);
-        packet_rate = 2600.0;
+        packet_rate = 754;             // 754 Packets/Second for Last or Strongest mode 1508 for dual (VLP-16 User Manual)
+        config_.model = "VLP16";
+        model_full_name = "VLP-16";
+        ROS_INFO("Setting model to: %s", model_full_name.c_str());
     }
   }
   private_nh.getParam("npackets", packet_rate);
@@ -119,8 +119,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   std::string dump_file;
   private_nh.param("pcap", dump_file, std::string(""));
 
-  private_nh.param("publish_position_packets_at_same_frequency_as_scans", publish_position_packets_at_same_frequency_as_scans_, true);
-  private_nh.param("publish_imu", publish_imu_, true);
+  // private_nh.param("publish_position_packets_at_same_frequency_as_scans", publish_position_packets_at_same_frequency_as_scans_, false);
 
   double cut_angle;
   private_nh.param("cut_angle", cut_angle, -0.01);
@@ -172,7 +171,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
                                                              &diag_max_freq_,
                                                              0.05, 1),
                                         TimeStampStatusParam(0.0, 1.5 * 1 / diag_max_freq_)));
-  diag_max_position_freq_ = publish_position_packets_at_same_frequency_as_scans_ ? diag_freq : 140;
+  // diag_max_position_freq_ = publish_position_packets_at_same_frequency_as_scans_ ? diag_freq : 140;
   diag_min_position_freq_ = diag_max_position_freq_;
   diag_position_topic_.reset(new TopicDiagnostic("velodyne position packets", diagnostics_,
                                         FrequencyStatusParam(&diag_min_position_freq_,
@@ -203,10 +202,6 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   if (position_port != 0){
     position_packet_pub_ =
       node.advertise<velodyne_msgs::VelodynePositionPacket>("velodyne_position_packets", 10);
-    gps_fix_pub_ =
-      node.advertise<sensor_msgs::NavSatFix>("velodyne_gnss_fix", 10);
-    imu_pub_ = 
-      node.advertise<sensor_msgs::Imu>("velodyne_imu", 10);
   }
 }
 
@@ -364,15 +359,16 @@ bool VelodyneDriver::poll(void)
   scan->header.frame_id = config_.frame_id;
   output_.publish(scan);
 
-  if(publish_position_packets_at_same_frequency_as_scans_){
-    velodyne_msgs::VelodynePositionPacket position_packet = input_->getPositionPacket();
+  // if(publish_position_packets_at_same_frequency_as_scans_){
+  //   velodyne_msgs::VelodynePositionPacket position_packet = input_->getPositionPacket();
+  //   if (position_packet.stamp.sec > 0){
+  //     position_packet_pub_.publish(position_packet);
 
-    position_packet_pub_.publish(position_packet);
-
-    // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
-    diag_position_topic_->tick(position_packet.stamp);
-    diagnostics_.update();
-  }
+  //     // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
+  //     diag_position_topic_->tick(position_packet.stamp);
+  //     diagnostics_.update();
+  //   }
+  // }
 
   // calculate RPM
   if (scan->packets.size() > 2){
@@ -431,7 +427,7 @@ bool VelodyneDriver::poll(void)
 bool VelodyneDriver::pollPosition(void){
   // Since the velodyne delivers data at a very high rate, keep
   // reading and publishing scans as fast as possible.
-  sensor_msgs::NavSatFix gps_data_;
+  // sensor_msgs::NavSatFix gps_data_;
   velodyne_msgs::VelodynePositionPacket position_packet_;
 
   while (true)
@@ -440,25 +436,14 @@ bool VelodyneDriver::pollPosition(void){
     int rc = input_->getPositionPacket(&position_packet_, config_.time_offset);
     if (rc == 0){ // got a full packet?
       // if we aren't throttling publishing to only once per scan
-      if (!publish_position_packets_at_same_frequency_as_scans_){
+      // if (!publish_position_packets_at_same_frequency_as_scans_){
         position_packet_pub_.publish(position_packet_);
 
         // if we have new gps data, publish it
         // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
         diag_position_topic_->tick(position_packet_.stamp);
         diagnostics_.update();
-      }
-      if ( input_->pollGPSData(&gps_data_) ){
-        if (gps_data_.header.stamp != last_gps_data_stamp_)
-        {
-          gps_fix_pub_.publish(gps_data_);
-          last_gps_data_stamp_ = gps_data_.header.stamp;
-        }
-      }
-      if (publish_imu_)
-      {
-        imu_pub_.publish(input_->getIMUData());
-      }
+      // }
       break;
     }
     else if (rc < 0){
@@ -502,15 +487,15 @@ void VelodyneDriver::produce_diagnostics(diagnostic_updater::DiagnosticStatusWra
       stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "Unknown PPS Status");
       ROS_WARN_THROTTLE(0.5, "Unknown PPS Status");
   };
-  sensor_msgs::NavSatFix gps_data = input_->getGPSData();
-  velodyne_msgs::VelodynePositionPacket packet_ = input_->getPositionPacket();
-  stat.add("GPS Location Timestamp", gps_data.header.stamp);
-  stat.add("GPS Location Latitude", gps_data.latitude);
-  stat.add("GPS Location Longitude", gps_data.longitude);
-  stat.add("GPS Location Altitude", gps_data.altitude);
+  // sensor_msgs::NavSatFix gps_data = input_->getGPSData();
+  // velodyne_msgs::VelodynePositionPacket packet_ = input_->getPositionPacket();
+  // stat.add("GPS Location Timestamp", gps_data.header.stamp);
+  // stat.add("GPS Location Latitude", gps_data.latitude);
+  // stat.add("GPS Location Longitude", gps_data.longitude);
+  // stat.add("GPS Location Altitude", gps_data.altitude);
   stat.add("Detected RPM", config_.rpm);
   stat.add("Last full revolution of sensor's rpm", last_rpm_);
-  stat.add("Position Packet timestamp", packet_.stamp);
+  // stat.add("Position Packet timestamp", packet_.stamp);
 }
 
 void VelodyneDriver::diagTimerCallback(const ros::TimerEvent &event)

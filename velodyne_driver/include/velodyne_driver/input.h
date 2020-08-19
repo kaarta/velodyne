@@ -40,8 +40,6 @@
 #include <ros/ros.h>
 #include <velodyne_msgs/VelodynePacket.h>
 #include <velodyne_msgs/VelodynePositionPacket.h>
-#include <sensor_msgs/Imu.h>
-#include <sensor_msgs/NavSatFix.h>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -70,23 +68,12 @@ namespace velodyne_driver
                           const double time_offset) = 0;
     virtual int getPositionPacket(velodyne_msgs::VelodynePositionPacket *pkt, const double time_offset) = 0;
 
-    /** @brief Parse a position packet from the Velodyne.
-     *
-     *  @details This overwrites the old data in imuData, so imuMutex should be locked/unlocked before/after calling this.
-     *
-     *  @param b A pointer to the first byte of the position packet, not including the message header.
-     */
-    void parseImuData(const uint8_t *b);
-    void parseNmeaString(const char * nmea_string);
     uint8_t getPPSStatus();
-    bool pollGPSData(sensor_msgs::NavSatFix* gps_fix);
     bool pollPositionPacket(velodyne_msgs::VelodynePositionPacket* packet);
 
     // convert a velodyne timestamp into current ROS time (currently assumes the velodyne is very closely synchronized to the sensor/IMU timestamps)
     ros::Time parseInternalTime(uint8_t* bytes, ros::Time system_time);
     velodyne_msgs::VelodynePositionPacket getPositionPacket();
-    sensor_msgs::NavSatFix getGPSData();
-    const sensor_msgs::Imu& getIMUData(){ return imu_data_; };
 
   protected:
     ros::NodeHandle private_nh_;
@@ -95,19 +82,10 @@ namespace velodyne_driver
     std::string devip_str_;
     std::string last_nmea_sentence_;
     bool process_position_packets_;
-    sensor_msgs::NavSatFix last_gps_data_;
-    sensor_msgs::Imu imu_data_;
     velodyne_msgs::VelodynePositionPacket last_position_packet_;
     uint8_t pps_status_;
     bool new_gps_packet_;
     std::mutex position_data_mutex_;
-
-    static constexpr const double gyroscopeScale = 0.09766 * M_PI / 180; // rad/sec
-    // const double temperatureScale = 0.1453; // C
-    // const double temperatureOffset = 25; // C
-
-    // used to scale the imu data integer to m/s^2
-    static constexpr const double accelerometerScale = (0.001221 * 9.80665); // m/s^2
   };
 
   /** @brief Live Velodyne input from socket. */
