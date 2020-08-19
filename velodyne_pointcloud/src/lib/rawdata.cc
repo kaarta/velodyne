@@ -101,22 +101,22 @@ namespace velodyne_rawdata
     config_.expected_factory_byte = (uint8_t) 0;
     std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
     std::string fallbackCalibrationFile;
-    if (laser_model == 0){
+    if (laser_model == Kaarta::StencilConstants::TYPE_VLP16){
       ROS_INFO("Setting up a VLP16 driver");
       fallbackCalibrationFile = pkgPath + "/params/VLP16db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x22;
     }
-    else if (laser_model == 1){
+    else if (laser_model == Kaarta::StencilConstants::TYPE_VLP32){
       ROS_INFO("Setting up a VLP32 driver");
       fallbackCalibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
       config_.expected_factory_byte = (uint8_t) 0x28;
     }
-    else if (laser_model == 2){
+    else if (laser_model == Kaarta::StencilConstants::TYPE_HDL32){
       ROS_INFO("Setting up an HDL32 driver");
       fallbackCalibrationFile = pkgPath + "/params/32db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x21;
     }
-    else if (laser_model == 16){
+    else if (laser_model == Kaarta::StencilConstants::TYPE_HDL64E){
       fallbackCalibrationFile = pkgPath + "/params/64e_utexas.yaml";
       config_.expected_factory_byte = (uint8_t) 0;
     }
@@ -160,7 +160,7 @@ namespace velodyne_rawdata
     offline_setup = false;
     int res = 0;
     // set laser parameters
-    laser_model = 0;
+    laser_model = Kaarta::StencilConstants::TYPE_VLP16;
     if (!private_nh.getParam("/laser_model", laser_model))
     {
       ROS_ERROR("No laser model parameter set. Using: %d", laser_model);
@@ -206,7 +206,7 @@ namespace velodyne_rawdata
 
   bool RawData::buildTimings(){
     // vlp16
-    if (laser_model == 0){
+    if (laser_model == Kaarta::StencilConstants::TYPE_VLP16){
       // timing table calculation, from velodyne user manual
       timing_offsets.resize(BLOCKS_PER_PACKET);
       for (size_t i=0; i < timing_offsets.size(); ++i){
@@ -232,7 +232,7 @@ namespace velodyne_rawdata
       }
     }
     // vlp32
-    else if (laser_model == 1){
+    else if (laser_model == Kaarta::StencilConstants::TYPE_VLP32){
       // timing table calculation, from velodyne user manual
       timing_offsets.resize(BLOCKS_PER_PACKET);
       for (size_t i=0; i < timing_offsets.size(); ++i){
@@ -257,7 +257,7 @@ namespace velodyne_rawdata
       }
     }
     // hdl32
-    else if (laser_model == 2){
+    else if (laser_model == Kaarta::StencilConstants::TYPE_HDL32){
       // timing table calculation, from velodyne user manual
       timing_offsets.resize(BLOCKS_PER_PACKET);
       for (size_t i=0; i < timing_offsets.size(); ++i){
@@ -335,15 +335,15 @@ namespace velodyne_rawdata
       switch(pkt.data[0x4b5]){
         case 0x22:
           ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(0, pkt_dual_mode, true);
+          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP16, pkt_dual_mode, true);
           break;
         case 0x28:
           ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(1, pkt_dual_mode, true);
+          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP32, pkt_dual_mode, true);
           break;
         case 0x21:
           ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(2, pkt_dual_mode, true);
+          configureLaserParams(Kaarta::StencilConstants::TYPE_HDL32, pkt_dual_mode, true);
           break;
         default:
           ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
@@ -379,7 +379,7 @@ namespace velodyne_rawdata
       float full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
       float single_firing = VLP32C_DSR_TOFFSET; // seconds
       float block_duration = VLP32C_BLOCK_TDURATION;
-      if (laser_model == 2){
+      if (laser_model == Kaarta::StencilConstants::TYPE_HDL32){
         full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
         single_firing = HDL32E_DSR_TOFFSET; // seconds
         block_duration = HDL32E_BLOCK_TDURATION;
@@ -438,7 +438,7 @@ namespace velodyne_rawdata
         azimuth_corrected = ((int)azimuth_corrected) % 36000;
         // ROS_ERROR_STREAM_COND(num > 1000, "Angle " << j <<": " << azimuth_corrected << " \t time = " << timing_offsets[block][j]);
         // if hdl32, rotate by 90 deg
-        if (laser_model == 2) {
+        if (laser_model == Kaarta::StencilConstants::TYPE_HDL32) {
           azimuth_corrected = (azimuth_corrected + 9000) % 36000;
         }
 

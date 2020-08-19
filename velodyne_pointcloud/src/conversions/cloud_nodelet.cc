@@ -17,6 +17,7 @@
 #include <nodelet/nodelet.h>
 
 #include "velodyne_pointcloud/convert.h"
+#include "velodyne_pointcloud/position_packet_converter.h"
 
 namespace velodyne_pointcloud
 {
@@ -30,6 +31,7 @@ namespace velodyne_pointcloud
   private:
 
     virtual void onInit();
+    boost::shared_ptr<PositionPacketConverter> position_packets_conv_;
     boost::shared_ptr<Convert> conv_;
   };
 
@@ -38,6 +40,10 @@ namespace velodyne_pointcloud
   {
     conv_.reset(new Convert(getNodeHandle(), getPrivateNodeHandle()));
     if (!conv_->initSuccessful()){
+      ROS_ERROR("Failed to init velodyne cloud converter nodelet");
+    }
+    position_packets_conv_.reset(new PositionPacketConverter(getNodeHandle(), getPrivateNodeHandle()));
+    if (!position_packets_conv_->initSuccessful()){
       ROS_ERROR("Failed to init velodyne cloud converter nodelet");
     }
   }
