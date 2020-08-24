@@ -204,6 +204,7 @@ namespace velodyne_rawdata
 
     std::vector<std::vector<float> > timing_offsets;
     int laser_model;
+    int laser_model_forced_;
   };
 
 } // namespace velodyne_rawdata

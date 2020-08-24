@@ -44,6 +44,10 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   std::string model_full_name;
   int laser_model = -1;
   node.getParam("/laser_model", laser_model);
+  if (node.getParam("/force_laser_model", laser_model))
+  {
+    ROS_WARN("Forcing use of laser model %d in driver", laser_model);
+  }
   if (laser_model == 0){
     packet_rate = 754;             // 754 Packets/Second for Last or Strongest mode 1508 for dual (VLP-16 User Manual)
     config_.model = "VLP16";
@@ -105,7 +109,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   std::string deviceName(std::string("Velodyne ") + model_full_name);
 
   private_nh.param("rpm", config_.rpm, 600.0);
-  last_rpm_ = config_.rpm;
+  last_rpm_ = -1;
   num_same_rpm_ = 11; // initialize the same rpm counter
   ROS_INFO_STREAM(deviceName << " assumed to be rotating at " << config_.rpm << " RPM");
 
@@ -184,9 +188,10 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   // open Velodyne input device or file
   if (dump_file != "")                  // have PCAP file?
     {
+      ROS_INFO_STREAM("loading file: " << dump_file);
       // read data from packet capture file
       input_.reset(new velodyne_driver::InputPCAP(private_nh, udp_port, position_port,
-                                                  packet_rate, dump_file));
+                                                  dump_file));
     }
   else
     {
@@ -218,6 +223,7 @@ void VelodyneDriver::updateNPackets()
   config_.npackets = (int) ceil(packet_rate / frequency);
   if (dual_return_)
     config_.npackets *= 2;
+
 }
 
 void VelodyneDriver::setRPM(double rpm){
@@ -233,8 +239,8 @@ void VelodyneDriver::setRPM(double rpm){
   const double diag_freq = frequency;
   diag_max_freq_ = diag_freq;
   diag_min_freq_ = diag_freq;
-  diag_max_position_freq_ = 14 * diag_freq;
-  diag_min_position_freq_ = 14 * diag_freq;
+  diag_max_position_freq_ = diag_freq * config_.npackets / 14;
+  diag_min_position_freq_ = diag_freq * config_.npackets / 14;
 
   ROS_INFO_STREAM("New RPM detected. Publishing " << config_.npackets << " packets per scan. RPM = " << config_.rpm);
 }
@@ -333,10 +339,9 @@ bool VelodyneDriver::poll(void)
   {
     ROS_WARN_THROTTLE(0.01, "Weird number of packets: %d. Expected: %d",
                       (int)scan->packets.size(), (int)config_.npackets);
-  
+
     int delta = 0;
     static int azimuth_prev;
-    static int azimuth;
     for (int i=0;i < scan->packets.size(); ++i)
     {
       int azimuth = *( (u_int16_t*) (&scan->packets[i].data[azimuth_data_pos]));
@@ -388,7 +393,12 @@ bool VelodyneDriver::poll(void)
                           (int) scan->packets.size(), first_azimuth/100.0f, last_azimuth/100.0f, num_revolutions, rpm, rpm_rounded);
 
     // check to see if we're getting a few of the same RPM
-    if (last_rpm_ == rpm_rounded){
+    if (last_rpm_ == -1){
+      setRPM(rpm_rounded);
+      last_rpm_ = rpm_rounded;
+      num_same_rpm_ = 11;
+    }
+    else if (last_rpm_ == rpm_rounded){
       if (config_.rpm == rpm_rounded){
         num_same_rpm_ = 11; // we're already set to this value, so don't process more
       }
