@@ -87,6 +87,7 @@ private:
   bool init_success;
 
   bool dual_return_;
+  int force_laser_model_;
   void updateNPackets();
 };
 
