@@ -170,14 +170,14 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
                                         FrequencyStatusParam(&diag_min_freq_,
                                                              &diag_max_freq_,
                                                              0.05, 1),
-                                        TimeStampStatusParam(0.0, 1.5 * 1 / diag_max_freq_)));
+                                        TimeStampStatusParam(0.0, 0.5)));
   // diag_max_position_freq_ = publish_position_packets_at_same_frequency_as_scans_ ? diag_freq : 140;
   diag_min_position_freq_ = diag_max_position_freq_;
   diag_position_topic_.reset(new TopicDiagnostic("velodyne position packets", diagnostics_,
                                         FrequencyStatusParam(&diag_min_position_freq_,
                                                              &diag_max_position_freq_,
                                                              0.05, 1),
-                                        TimeStampStatusParam(0.0, 3 * 1 / diag_max_position_freq_)));
+                                        TimeStampStatusParam(0.0, 0.5)));
   diag_timer_ = private_nh.createTimer(ros::Duration(0.2), &VelodyneDriver::diagTimerCallback,this);
   diagnostics_.add("velodyne status", this, &VelodyneDriver::produce_diagnostics);
 
@@ -235,13 +235,6 @@ void VelodyneDriver::setRPM(double rpm){
   diag_min_freq_ = diag_freq;
   diag_max_position_freq_ = 14 * diag_freq;
   diag_min_position_freq_ = 14 * diag_freq;
-
-  using namespace diagnostic_updater;
-  diag_topic_.reset(new TopicDiagnostic("velodyne points", diagnostics_,
-                                        FrequencyStatusParam(&diag_min_freq_,
-                                                             &diag_max_freq_,
-                                                             0.05, 1),
-                                        TimeStampStatusParam(0.0, 1.5 * 1.0/frequency)));
 
   ROS_INFO_STREAM("New RPM detected. Publishing " << config_.npackets << " packets per scan. RPM = " << config_.rpm);
 }
