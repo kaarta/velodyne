@@ -120,7 +120,6 @@ namespace velodyne_driver
     InputPCAP(ros::NodeHandle private_nh,
               uint16_t port = DATA_PORT_NUMBER,
               uint16_t position_port = POSITION_PORT_NUMBER,
-              double packet_rate = 0.0,
               std::string filename="",
               bool read_once=false,
               bool read_fast=false,
@@ -135,7 +134,7 @@ namespace velodyne_driver
     void setDeviceIP( const std::string& ip );
 
   private:
-    ros::Rate packet_rate_;
+    ros::Time last_time_;
     std::string filename_;
     pcap_t *pcap_;
     bpf_program pcap_packet_filter_;

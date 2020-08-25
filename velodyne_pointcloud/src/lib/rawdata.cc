@@ -86,7 +86,19 @@ namespace velodyne_rawdata
         client.publishFormatStr("/adjusted_laser_model", "true");
         client.publishFormatStr("/laser_model", "%d", laser_model);
       }
-      ros::param::set("/laser_model", laser_model);
+      int force_laser_model = -1;
+      if (ros::param::get("/force_laser_model", force_laser_model))
+      {
+        ros::param::set("/laser_model", force_laser_model);
+        laser_model = force_laser_model;
+        laser_model_forced_ = true;
+        ROS_WARN("Forcing use of laser model %d in rawdata", laser_model);
+      }
+      else
+      {
+        laser_model_forced_ = false;
+        ros::param::set("/laser_model", laser_model);
+      }
     }
     
     // get path to angles.config file for this device
@@ -153,6 +165,12 @@ namespace velodyne_rawdata
     if (!private_nh.getParam("/laser_model", laser_model))
     {
       ROS_ERROR("No laser model parameter set. Using: %d", laser_model);
+    }
+    laser_model_forced_ = false;
+    if (private_nh.getParam("/force_laser_model", laser_model))
+    {
+      laser_model_forced_ = true;
+      ROS_WARN("Forcing use of laser_model to %d in rawdata", laser_model);
     }
     if (!private_nh.getParam("calibration", config_.calibrationFile))
     {
@@ -298,24 +316,32 @@ namespace velodyne_rawdata
     }
     
     if (pkt.data[0x4b5] != config_.expected_factory_byte || pkt_dual_mode != config_.dual_return_mode){
-      ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
-      ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
-      switch(pkt.data[0x4b5]){
-        case 0x22:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: ");
-          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP16, pkt_dual_mode, true);
-          break;
-        case 0x28:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1");
-          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP32, pkt_dual_mode, true);
-          break;
-        case 0x21:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2");
-          configureLaserParams(Kaarta::StencilConstants::TYPE_HDL32, pkt_dual_mode, true);
-          break;
-        default:
-          ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
-          exit(1);
+      if (laser_model_forced_)
+      {
+        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected model: %#02x. Data packet gives: %#02x", laser_model, config_.expected_factory_byte, pkt.data[0x4b5]);
+        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected Dual mode = %d. Dual mode = %d", laser_model, config_.dual_return_mode, pkt_dual_mode);
+      }
+      else
+      {
+        ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
+        ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
+        switch(pkt.data[0x4b5]){
+          case 0x22:
+            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: ");
+            configureLaserParams(Kaarta::StencilConstants::TYPE_VLP16, pkt_dual_mode, true);
+            break;
+          case 0x28:
+            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1");
+            configureLaserParams(Kaarta::StencilConstants::TYPE_VLP32, pkt_dual_mode, true);
+            break;
+          case 0x21:
+            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2");
+            configureLaserParams(Kaarta::StencilConstants::TYPE_HDL32, pkt_dual_mode, true);
+            break;
+          default:
+            ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
+            exit(1);
+        }
       }
     }
 

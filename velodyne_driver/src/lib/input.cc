@@ -412,10 +412,9 @@ namespace velodyne_driver
    *  @param filename PCAP dump file name
    */
   InputPCAP::InputPCAP(ros::NodeHandle private_nh, uint16_t port, uint16_t position_port,
-                       double packet_rate, std::string filename,
+                       std::string filename,
                        bool read_once, bool read_fast, double repeat_delay):
     Input(private_nh, port, position_port),
-    packet_rate_(packet_rate),
     new_position_packet_(false),
     filename_(filename)
   {
@@ -530,7 +529,15 @@ namespace velodyne_driver
 
             // Keep the reader from blowing through the file.
             if (read_fast_ == false)
-              packet_rate_.sleep();
+            {
+              ros::Time packet_time(header->ts.tv_sec, header->ts.tv_usec * 1000);
+              // ROS_INFO_STREAM("Got data on port: " << dport);
+
+              if (!last_time_.isZero())
+                (packet_time-last_time_).sleep();
+
+              last_time_ = packet_time;
+            }
 
             empty_ = false;
             return 0;                   // success
