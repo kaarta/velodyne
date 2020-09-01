@@ -44,6 +44,12 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   std::string model_full_name;
   int laser_model = -1;
   node.getParam("/laser_model", laser_model);
+  force_laser_model_ = -1000;
+  node.getParam("/force_laser_model", force_laser_model_);
+  if (node.getParam("/force_laser_model", laser_model))
+  {
+    ROS_WARN("Forcing use of laser model %d in driver", laser_model);
+  }
   if (laser_model == 0){
     packet_rate = 754;             // 754 Packets/Second for Last or Strongest mode 1508 for dual (VLP-16 User Manual)
     config_.model = "VLP16";
@@ -105,7 +111,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   std::string deviceName(std::string("Velodyne ") + model_full_name);
 
   private_nh.param("rpm", config_.rpm, 600.0);
-  last_rpm_ = config_.rpm;
+  last_rpm_ = -1;
   num_same_rpm_ = 11; // initialize the same rpm counter
   ROS_INFO_STREAM(deviceName << " assumed to be rotating at " << config_.rpm << " RPM");
 
@@ -170,23 +176,24 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
                                         FrequencyStatusParam(&diag_min_freq_,
                                                              &diag_max_freq_,
                                                              0.05, 1),
-                                        TimeStampStatusParam(0.0, 1.5 * 1 / diag_max_freq_)));
+                                        TimeStampStatusParam(0.0, 0.5)));
   // diag_max_position_freq_ = publish_position_packets_at_same_frequency_as_scans_ ? diag_freq : 140;
   diag_min_position_freq_ = diag_max_position_freq_;
   diag_position_topic_.reset(new TopicDiagnostic("velodyne position packets", diagnostics_,
                                         FrequencyStatusParam(&diag_min_position_freq_,
                                                              &diag_max_position_freq_,
                                                              0.05, 1),
-                                        TimeStampStatusParam(0.0, 3 * 1 / diag_max_position_freq_)));
+                                        TimeStampStatusParam(0.0, 0.5)));
   diag_timer_ = private_nh.createTimer(ros::Duration(0.2), &VelodyneDriver::diagTimerCallback,this);
   diagnostics_.add("velodyne status", this, &VelodyneDriver::produce_diagnostics);
 
   // open Velodyne input device or file
   if (dump_file != "")                  // have PCAP file?
     {
+      ROS_INFO_STREAM("loading file: " << dump_file);
       // read data from packet capture file
       input_.reset(new velodyne_driver::InputPCAP(private_nh, udp_port, position_port,
-                                                  packet_rate, dump_file));
+                                                  dump_file));
     }
   else
     {
@@ -218,6 +225,7 @@ void VelodyneDriver::updateNPackets()
   config_.npackets = (int) ceil(packet_rate / frequency);
   if (dual_return_)
     config_.npackets *= 2;
+
 }
 
 void VelodyneDriver::setRPM(double rpm){
@@ -233,15 +241,8 @@ void VelodyneDriver::setRPM(double rpm){
   const double diag_freq = frequency;
   diag_max_freq_ = diag_freq;
   diag_min_freq_ = diag_freq;
-  diag_max_position_freq_ = 14 * diag_freq;
-  diag_min_position_freq_ = 14 * diag_freq;
-
-  using namespace diagnostic_updater;
-  diag_topic_.reset(new TopicDiagnostic("velodyne points", diagnostics_,
-                                        FrequencyStatusParam(&diag_min_freq_,
-                                                             &diag_max_freq_,
-                                                             0.05, 1),
-                                        TimeStampStatusParam(0.0, 1.5 * 1.0/frequency)));
+  diag_max_position_freq_ = diag_freq * config_.npackets / 14;
+  diag_min_position_freq_ = diag_freq * config_.npackets / 14;
 
   ROS_INFO_STREAM("New RPM detected. Publishing " << config_.npackets << " packets per scan. RPM = " << config_.rpm);
 }
@@ -335,40 +336,27 @@ bool VelodyneDriver::poll(void)
     }
   }
 
-  // publish message using time of first packet
-  if (scan->packets.size() < config_.npackets * .95 || scan->packets.size() > config_.npackets * 1.05)
+  if (force_laser_model_ != -1000)
   {
-    ROS_WARN_THROTTLE(0.01, "Weird number of packets: %d. Expected: %d",
-                      (int)scan->packets.size(), (int)config_.npackets);
-  
-    int delta = 0;
-    static int azimuth_prev;
-    static int azimuth;
-    for (int i=0;i < scan->packets.size(); ++i)
-    {
-      int azimuth = *( (u_int16_t*) (&scan->packets[i].data[azimuth_data_pos]));
-
-      delta = (azimuth - azimuth_prev + 36000) % 36000;
-
-      ROS_DEBUG("Azimuth[%d]: %8d. delta: %8d", i, azimuth, delta);
-      azimuth_prev = azimuth;
+    uint8_t model_byte;
+    switch(force_laser_model_){
+      case 0:
+        model_byte = 0x22;
+        break;
+      case 1:
+        model_byte = 0x28;
+        break;
+      case 2:
+        model_byte = 0x21;
+        break;
+      default:
+        ROS_ERROR_THROTTLE(1, "Invalid force_laser_model given: %d", force_laser_model_);
+        model_byte = 0;
     }
+
+    for (unsigned int i=0; i < scan->packets.size(); ++i)
+      scan->packets[i].data[0x4b5] = model_byte;
   }
-  ROS_DEBUG("Publishing a full Velodyne scan.");
-  scan->header.stamp = scan->packets.front().stamp;
-  scan->header.frame_id = config_.frame_id;
-  output_.publish(scan);
-
-  // if(publish_position_packets_at_same_frequency_as_scans_){
-  //   velodyne_msgs::VelodynePositionPacket position_packet = input_->getPositionPacket();
-  //   if (position_packet.stamp.sec > 0){
-  //     position_packet_pub_.publish(position_packet);
-
-  //     // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
-  //     diag_position_topic_->tick(position_packet.stamp);
-  //     diagnostics_.update();
-  //   }
-  // }
 
   // calculate RPM
   if (scan->packets.size() > 2){
@@ -395,7 +383,12 @@ bool VelodyneDriver::poll(void)
                           (int) scan->packets.size(), first_azimuth/100.0f, last_azimuth/100.0f, num_revolutions, rpm, rpm_rounded);
 
     // check to see if we're getting a few of the same RPM
-    if (last_rpm_ == rpm_rounded){
+    if (last_rpm_ == -1){
+      setRPM(rpm_rounded);
+      last_rpm_ = rpm_rounded;
+      num_same_rpm_ = 11;
+    }
+    else if (last_rpm_ == rpm_rounded){
       if (config_.rpm == rpm_rounded){
         num_same_rpm_ = 11; // we're already set to this value, so don't process more
       }
@@ -415,6 +408,40 @@ bool VelodyneDriver::poll(void)
     out.data = rpm;
     rpm_pub_.publish(out);
   }
+
+  // publish message using time of first packet
+  if (scan->packets.size() < config_.npackets * .95 || scan->packets.size() > config_.npackets * 1.05)
+  {
+    ROS_WARN_THROTTLE(0.01, "Weird number of packets: %d. Expected: %d",
+                      (int)scan->packets.size(), (int)config_.npackets);
+
+    int delta = 0;
+    static int azimuth_prev;
+    for (int i=0;i < scan->packets.size(); ++i)
+    {
+      int azimuth = *( (u_int16_t*) (&scan->packets[i].data[azimuth_data_pos]));
+
+      delta = (azimuth - azimuth_prev + 36000) % 36000;
+
+      ROS_DEBUG("Azimuth[%d]: %8d. delta: %8d", i, azimuth, delta);
+      azimuth_prev = azimuth;
+    }
+  }
+  ROS_DEBUG("Publishing a full Velodyne scan.");
+  scan->header.stamp = scan->packets.front().stamp;
+  scan->header.frame_id = config_.frame_id;
+  output_.publish(scan);
+
+  // if(publish_position_packets_at_same_frequency_as_scans_){
+  //   velodyne_msgs::VelodynePositionPacket position_packet = input_->getPositionPacket();
+  //   if (position_packet.stamp.sec > 0){
+  //     position_packet_pub_.publish(position_packet);
+
+  //     // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);
+  //     diag_position_topic_->tick(position_packet.stamp);
+  //     diagnostics_.update();
+  //   }
+  // }
 
   // notify diagnostics that a message has been published, updating
   // its status
