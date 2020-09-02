@@ -83,31 +83,34 @@ namespace velodyne_rawdata
     ROS_INFO("Configuring laser_model to: %d. Dual mode: %d. Override = %d", laser_model_, dual_mode, override);
     laser_model = laser_model_;
 
+    if (!offline_setup)
+    {
+      int force_laser_model = -1;
+      if (ros::param::get("/force_laser_model", force_laser_model))
+      {
+        laser_model = force_laser_model;
+        laser_model_forced_ = true;
+        ROS_WARN("Forcing use of laser model %d in rawdata", laser_model);
+      }
+      else
+      {
+        laser_model_forced_ = false;
+      }
+    }
+
     if (override){
       if (!offline_setup)
       {
-        int force_laser_model = -1;
-        if (ros::param::get("/force_laser_model", force_laser_model))
-        {
-          ros::param::set("/laser_model", force_laser_model);
-          laser_model = force_laser_model;
-          laser_model_forced_ = true;
-          ROS_WARN("Forcing use of laser model %d in rawdata", laser_model);
+        // set the parameter and log the change
+        Kaarta::ScanInfoManagerROSClient client;
+        if (client.init(true)){
+          client.publishFormatStr("/adjusted_laser_model", "true");
+          client.publishFormatStr("/laser_model", "%d", laser_model);
         }
-        else
-        {
-          laser_model_forced_ = false;
-          // set the parameter and log the change
-          Kaarta::ScanInfoManagerROSClient client;
-          if (client.init(true)){
-            client.publishFormatStr("/adjusted_laser_model", "true");
-            client.publishFormatStr("/laser_model", "%d", laser_model);
-          }
-          ros::param::set("/laser_model", laser_model);
-        }
+        ros::param::set("/laser_model", laser_model);
       }
     }
-    
+
     // get path to angles.config file for this device
     config_.dual_return_mode = dual_mode;
     config_.expected_factory_byte = (uint8_t) 0;
