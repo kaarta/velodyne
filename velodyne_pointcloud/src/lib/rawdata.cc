@@ -189,9 +189,10 @@ namespace velodyne_rawdata
     if (!private_nh.getParam("calibration", config_.calibrationFile))
     {
       ROS_ERROR("Failed to read calibration file parameter. Falling back to model specific calibration");
-      res = 1;
+      // res = 1;
     }
     if (!configureLaserParams(laser_model, false)){
+      ROS_WARN("Failed to configure laser params to laser model: %d", laser_model);
       res = 2;
     }
 
@@ -203,6 +204,7 @@ namespace velodyne_rawdata
       upward = true;
     }
 
+    initialized_ = (res == 0);
     return res;
   }
 
@@ -219,7 +221,10 @@ namespace velodyne_rawdata
 
     if (!configureLaserParams(laser_model, false)){
       res = 2;
+      ROS_WARN("Failed to configure laser params to laser model: %d", laser_model);
     }
+
+    initialized_ = (res == 0);
 
     return res;
   }

@@ -174,6 +174,8 @@ namespace velodyne_rawdata
 
     velodyne_pointcloud::Calibration& getCalibrations(){ return calibration_;};
 
+    bool isInitialized(){ return initialized_; };
+
   private:
 
     /** configuration parameters */
@@ -219,6 +221,8 @@ namespace velodyne_rawdata
     std::vector<std::vector<float> > timing_offsets;
     int laser_model;
     int laser_model_forced_;
+
+    bool initialized_;
   };
 
 } // namespace velodyne_rawdata
