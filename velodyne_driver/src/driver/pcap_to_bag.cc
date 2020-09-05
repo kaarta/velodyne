@@ -3,6 +3,8 @@
 #include <rosbag/recorder.h>
 #include <velodyne_msgs/VelodyneScan.h>
 #include <velodyne_msgs/VelodynePositionPacket.h>
+#include <std_msgs/Empty.h>
+#include <std_msgs/Int32.h>
 #include <arpa/inet.h>
 
 ros::Time parseInternalTime(uint8_t* bytes, ros::Time system_time) {
@@ -184,7 +186,7 @@ int main(int argc, char*argv[])
       if (!has_wrote_pcap_identifier)
       {
         std_msgs::Empty empty;
-        bag.write("generated_pcap_to_bag", position_packet.stamp, empty);
+        bag.write("/generated_pcap_to_bag", position_packet.stamp, empty);
         has_wrote_pcap_identifier = true;
       }
     }
@@ -201,6 +203,9 @@ int main(int argc, char*argv[])
           if (detected_model != 0)
           {
             detected_model = 0;
+            std_msgs::Int32 laser_model;
+            laser_model.data = force_model >= 0 ? force_model : detected_model;
+            bag.write("/laser_model", lidar_packet.stamp, laser_model);
             printf("detected model: %d\n", detected_model);
           }
           break;
@@ -208,6 +213,9 @@ int main(int argc, char*argv[])
           if (detected_model != 1)
           {
             detected_model = 1;
+            std_msgs::Int32 laser_model;
+            laser_model.data = force_model >= 0 ? force_model : detected_model;
+            bag.write("/laser_model", lidar_packet.stamp, laser_model);
             printf("detected model: %d\n", detected_model);
           }
           break;
@@ -215,6 +223,9 @@ int main(int argc, char*argv[])
           if (detected_model != 2)
           {
             detected_model = 2;
+            std_msgs::Int32 laser_model;
+            laser_model.data = force_model >= 0 ? force_model : detected_model;
+            bag.write("/laser_model", lidar_packet.stamp, laser_model);
             printf("detected model: %d\n", detected_model);
           }
           break;
@@ -251,7 +262,7 @@ int main(int argc, char*argv[])
         if (!has_wrote_pcap_identifier)
         {
           std_msgs::Empty empty;
-          bag.write("generated_pcap_to_bag", lidar_packet.stamp, empty);
+          bag.write("/generated_pcap_to_bag", lidar_packet.stamp, empty);
           has_wrote_pcap_identifier = true;
         }
       }
