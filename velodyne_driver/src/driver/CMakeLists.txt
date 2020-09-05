@@ -1,4 +1,11 @@
 # build the driver node
+add_executable(pcap_to_bag pcap_to_bag.cc)
+add_dependencies(pcap_to_bag velodyne_driver_gencfg)
+target_link_libraries(pcap_to_bag
+  ${catkin_LIBRARIES}
+  ${libpcap_LIBRARIES}
+)
+
 add_executable(velodyne_node velodyne_node.cc driver.cc)
 add_dependencies(velodyne_node velodyne_driver_gencfg)
 target_link_libraries(velodyne_node
@@ -17,7 +24,7 @@ target_link_libraries(driver_nodelet
 )
 
 # install runtime files
-install(TARGETS velodyne_node
+install(TARGETS velodyne_node pcap_to_bag
         RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
         COMPONENT main
 )
