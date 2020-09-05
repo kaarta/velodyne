@@ -69,13 +69,26 @@ int main(int argc, char*argv[])
   }
 
   int force_model = -1;
-  if(argc == 4)
+  if(argc == 4 && strlen(argv[3]) > 0)
   {
+    try
+    {
+      force_model = boost::lexical_cast<int>(argv[3]);
+      std::cout << force_model << '\n';
+    }
+    catch (const boost::bad_lexical_cast &e)
+    {
+      std::cerr <<"Invalid 'force model' parameter given to pcap_to_bag: \""<<argv[3]<<"\"" << std::endl;
+      std::cerr << e.what() << '\n';
+      return 1;
+    }
+    
     printf("Forcing model to %d\n", force_model);
-    force_model =  atoi(argv[3]);
     if (force_model < 0 || force_model > 2)
     {
-      return 0;
+      std::cerr <<"Invalid 'force model' parameter given to pcap_to_bag: \""<<argv[3]<<"\" converts to integer: "
+                << force_model <<" which is invalid"<<std::endl;
+      return 1;
     }
   }
 
@@ -89,7 +102,7 @@ int main(int argc, char*argv[])
   if (!boost::filesystem::exists(filename))
   {
     printf("Input file does not exist: '%s'\n", filename.c_str());
-    return 1;
+    return 2;
   }
 
   pcap = NULL;
@@ -97,7 +110,7 @@ int main(int argc, char*argv[])
   if ((pcap = pcap_open_offline(filename.c_str(), errbuf) ) == NULL)
   {
     printf("Error opening pcap file.\n");
-    return 1;
+    return 2;
   }
 
   int data_port = 2368;
@@ -133,7 +146,7 @@ int main(int argc, char*argv[])
   uintmax_t num_packets_read = 0;
   bool file_is_empty = true;
   int res;
-  printf("Processing pcap...\n", filename_out.c_str());
+  printf("Processing pcap... \"%s\"\n", filename_out.c_str());
   while ((res = pcap_next_ex(pcap, &header, &pkt_data)) >= 0)
   {
     ++num_packets_read;
@@ -255,7 +268,7 @@ int main(int argc, char*argv[])
   {
     ROS_WARN("Error %d reading Velodyne packet: %s. File has no velodyne data", 
               res, pcap_geterr(pcap));
-    return 2;
+    return 3;
   }
 
   // I can't figure out how to rewind the file, because it
