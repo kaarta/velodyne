@@ -45,7 +45,8 @@ namespace velodyne_rawdata
 
   RawData::RawData() : 
     last_azimuth_diff(20),
-    offline_setup(false)
+    offline_setup(false),
+    initialized_(false)
   {
   }
   
@@ -101,6 +102,7 @@ namespace velodyne_rawdata
     if (override){
       if (!offline_setup)
       {
+        ROS_INFO("Setting scan info values for laser model");
         // set the parameter and log the change
         Kaarta::ScanInfoManagerROSClient client;
         if (client.init(true)){
@@ -172,6 +174,7 @@ namespace velodyne_rawdata
   /** Set up for on-line operation. */
   int RawData::setup(ros::NodeHandle private_nh)
   {
+    ROS_INFO("Setting up online");
     offline_setup = false;
     int res = 0;
     // set laser parameters
@@ -211,6 +214,7 @@ namespace velodyne_rawdata
   /** Set up for ROS operation. */
   int RawData::setupOffline(int _model, std::string _calibration, bool _upward)
   {
+    ROS_INFO("Setting up offline");
     offline_setup = true;
 
     int res = 0;
