@@ -25,6 +25,7 @@
   <depend>nodelet</depend>
   <depend>pluginlib</depend>
   <depend>roscpp</depend>
+  <depend>rosbag</depend>
   <depend>tf</depend>
   <depend>velodyne_msgs</depend>
 
