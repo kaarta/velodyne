@@ -176,6 +176,7 @@ namespace velodyne_rawdata
       double tmp_max_angle;
       uint8_t expected_factory_byte;
       bool dual_return_mode;
+      bool publish_nan_points;
     } Config;
     Config config_;
 
