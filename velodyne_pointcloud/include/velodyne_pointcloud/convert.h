@@ -66,6 +66,8 @@ namespace velodyne_pointcloud
     // A point cloud with same time and frame ID as raw data
     PointcloudXYZIADRT outMsg;
 
+    velodyne_rawdata::VPointCloudRaw::Ptr rawCloud;
+    
     bool init_success;
   };
 

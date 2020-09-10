@@ -41,6 +41,7 @@ namespace velodyne_pointcloud {
     int min_intensity;
     float focal_distance;
     float focal_slope;
+    float distance_scale_m;
 
     /** cached values calculated when the calibration file is read */
     float cos_rot_correction;              ///< cosine of rot_correction

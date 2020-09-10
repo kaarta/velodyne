@@ -39,8 +39,10 @@ namespace velodyne_rawdata
     // Shorthand typedefs for point cloud representations
   // typedef velodyne_pointcloud::PointXYZIR VPoint;
   typedef Kaarta::KaartaSensorPoint VPoint;
+  typedef velodyne_pointcloud::RawSensorPoint VPointRaw;
   // typedef pcl::PointCloud<VPoint> VPointCloud;
   typedef pcl::PointCloud<VPoint> VPointCloud;
+  typedef pcl::PointCloud<VPointRaw> VPointCloudRaw;
 
   /**
    * Raw Velodyne packet constants and structures.
@@ -148,6 +150,9 @@ namespace velodyne_rawdata
      */
     int setup(ros::NodeHandle private_nh);
 
+    int setupOffline(int _model, std::string _calibration, bool _upward);
+    bool offline_setup;
+
     /** \brief set up the laser configuration files using an integer laser model
      * @param laser_model
      *   0 = VLP16
@@ -157,10 +162,19 @@ namespace velodyne_rawdata
      */
     bool configureLaserParams(int laser_model, bool dual_mode, bool override = false);
 
+    void unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
+    void unpackRAW_vlp16(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
+    
     void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
     
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
+
+    std::string getCalibrationFilename(){ return config_.calibrationFile; };
+
+    velodyne_pointcloud::Calibration& getCalibrations(){ return calibration_;};
+
+    bool isInitialized(){ return initialized_; };
 
   private:
 
@@ -203,9 +217,13 @@ namespace velodyne_rawdata
               && range <= config_.max_range);
     }
 
+    int last_azimuth_diff;
+
     std::vector<std::vector<float> > timing_offsets;
     int laser_model;
     int laser_model_forced_;
+
+    bool initialized_;
   };
 
 } // namespace velodyne_rawdata

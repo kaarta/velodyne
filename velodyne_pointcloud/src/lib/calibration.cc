@@ -41,6 +41,7 @@ namespace velodyne_pointcloud
   const std::string LASERS = "lasers";
   const std::string LASER_ID = "laser_id";
   const std::string ROT_CORRECTION = "rot_correction";
+  const std::string DIST_SCALE = "distance_scale_m";
   const std::string VERT_CORRECTION = "vert_correction";
    const std::string DIST_CORRECTION = "dist_correction";
   const std::string TWO_PT_CORRECTION_AVAILABLE =
@@ -59,6 +60,10 @@ namespace velodyne_pointcloud
                     std::pair<int, LaserCorrection>& correction)
   {
     node[LASER_ID] >> correction.first;
+
+    if (node[DIST_SCALE])
+      node[DIST_SCALE] >> correction.second.distance_scale_m;
+
     node[ROT_CORRECTION] >> correction.second.rot_correction;
     node[VERT_CORRECTION] >> correction.second.vert_correction;
     node[DIST_CORRECTION] >> correction.second.dist_correction;
@@ -152,6 +157,8 @@ namespace velodyne_pointcloud
     calibration.distance_resolution_m = distance_resolution_m;
     for (int i = 0; i < num_lasers; i++) {
       std::pair<int, LaserCorrection> correction;
+      // in case this isn't our calibration file
+      correction.second.distance_scale_m = distance_resolution_m;
       lasers[i] >> correction;
       calibration.laser_corrections.insert(correction);
     }
@@ -195,6 +202,11 @@ namespace velodyne_pointcloud
     out << YAML::Key << LASER_ID << YAML::Value << correction.first;
     out << YAML::Key << ROT_CORRECTION <<
       YAML::Value << correction.second.rot_correction;
+    if (correction.second.distance_scale_m > 0)
+    {
+      out << YAML::Key << DIST_SCALE <<
+        YAML::Value << correction.second.distance_scale_m;
+    }
     out << YAML::Key << VERT_CORRECTION <<
       YAML::Value << correction.second.vert_correction;
     out << YAML::Key << DIST_CORRECTION <<
