@@ -17,6 +17,7 @@
   <arg name="repeat_delay" default="0.0" />
   <arg name="rpm" default="600.0" />
   <arg name="cut_angle" default="0" />
+  <arg name="publish_nan_points" default="0" />
   <!-- Valid models are:
         "64E_S2"
         "64E_S2.1"
@@ -50,5 +51,6 @@
     <arg name="manager" value="$(arg manager)" />
     <arg name="max_range" value="$(arg max_range)"/>
     <arg name="min_range" value="$(arg min_range)"/>
+    <arg name="publish_nan_points" value="$(arg publish_nan_points)" />
   </include>
 </launch>
