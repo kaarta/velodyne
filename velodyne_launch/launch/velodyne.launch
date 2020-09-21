@@ -17,7 +17,8 @@
   <arg name="repeat_delay" default="0.0" />
   <arg name="rpm" default="600.0" />
   <arg name="cut_angle" default="0" />
-  <arg name="publish_nan_points" default="0" />
+  <arg name="publish_nan_points" default="false" />
+  <arg name="publish_position_packets_at_same_frequency_as_scans" default="true" />
   <!-- Valid models are:
         "64E_S2"
         "64E_S2.1"

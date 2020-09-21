@@ -195,7 +195,7 @@ namespace velodyne_rawdata
       ROS_ERROR("Failed to read calibration file parameter. Falling back to model specific calibration");
       // res = 1;
     }
-    if (!configureLaserParams(laser_model, false)){
+    if (!configureLaserParams(laser_model, false, true)){
       ROS_WARN("Failed to configure laser params to laser model: %d", laser_model);
       res = 2;
     }
@@ -919,15 +919,15 @@ namespace velodyne_rawdata
       switch(pkt.data[0x4b5]){
         case 0x22:
           ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(0, pkt_dual_mode, true);
+          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP16, pkt_dual_mode, true);
           break;
         case 0x28:
           ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(1, pkt_dual_mode, true);
+          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP32, pkt_dual_mode, true);
           break;
         case 0x21:
           ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(2, pkt_dual_mode, true);
+          configureLaserParams(Kaarta::StencilConstants::TYPE_HDL32, pkt_dual_mode, true);
           break;
         default:
           ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);

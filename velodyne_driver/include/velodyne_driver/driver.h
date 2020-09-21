@@ -89,6 +89,9 @@ private:
   bool dual_return_;
   int force_laser_model_;
   void updateNPackets();
+  int laser_model_;
+  uint8_t expected_factory_byte_;
+  bool configureForModelByte(const uint8_t new_byte);
 };
 
 } // namespace velodyne_driver
