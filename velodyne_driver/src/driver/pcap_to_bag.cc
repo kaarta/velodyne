@@ -6,6 +6,7 @@
 #include <std_msgs/Empty.h>
 #include <std_msgs/Int32.h>
 #include <arpa/inet.h>
+#include <boost/filesystem.hpp>
 
 ros::Time parseInternalTime(uint8_t* bytes, ros::Time system_time) {
   uint32_t usec = (*(uint32_t*)bytes);
