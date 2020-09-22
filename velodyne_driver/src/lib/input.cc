@@ -594,7 +594,8 @@ namespace velodyne_driver
     return 0;
   }
 
-  ros::Time Input::parseInternalTime(uint8_t* bytes, ros::Time system_time) {
+  ros::Time Input::parseInternalTime(const uint8_t* bytes, const ros::Time& system_time) const
+  {
     uint32_t usec = (*(uint32_t*)bytes);
 
     double sensorSec = usec / 1000000.0;

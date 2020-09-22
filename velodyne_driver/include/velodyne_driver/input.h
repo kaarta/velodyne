@@ -72,7 +72,7 @@ namespace velodyne_driver
     bool pollPositionPacket(velodyne_msgs::VelodynePositionPacket* packet);
 
     // convert a velodyne timestamp into current ROS time (currently assumes the velodyne is very closely synchronized to the sensor/IMU timestamps)
-    ros::Time parseInternalTime(uint8_t* bytes, ros::Time system_time);
+    inline ros::Time parseInternalTime(const uint8_t* bytes, const ros::Time& system_time) const;
     velodyne_msgs::VelodynePositionPacket getPositionPacket();
 
   protected:
