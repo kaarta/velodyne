@@ -43,7 +43,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
   // get model name, validate string, determine packet rate
   private_nh.param("model", config_.model, std::string("64E"));
   std::string model_full_name;
-  node.getParam("/laser_model_", laser_model_);
+  node.getParam("/laser_model", laser_model_);
   force_laser_model_ = -1000;
   if (node.getParam("/force_laser_model", force_laser_model_))
   {
@@ -69,7 +69,7 @@ VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
     ROS_INFO("Setting model to: %s", model_full_name.c_str());
   }
   else{
-    ROS_ERROR("Could not identify /laser_model_ parameter: %d. Initial driver configuration failed", laser_model_);
+    ROS_ERROR("Could not identify /laser_model parameter: %d. Initial driver configuration failed", laser_model_);
 
     if ((config_.model == "64E_S2") || 
         (config_.model == "64E_S2.1"))    // generates 1333312 points per second
