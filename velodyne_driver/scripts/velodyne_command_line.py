@@ -95,9 +95,14 @@ class VelodyneConfigurator:
             return (False, [])
 
     def setup_settings(self, laser_state="on", rpm="600", returns="Strongest"):
-        settings = {'laser':'on', 
-                    'rpm':'600',
-                    'returns': 'Strongest'}
+        if not laser_state in ["on", "off"]:
+          if (not self.quiet):
+                print("Failed to set settings to: " + str(settings) +" ... error code = " + str(code))
+          raise ValueError("laser state must be \"on\" or \"off\"")
+
+        settings = {'laser': laser_state, 
+                    'rpm': rpm,
+                    'returns': returns}
 
         rc, code = self.sensor_do('setting', urlencode(settings), self.buffer)
         if (rc):
@@ -231,6 +236,66 @@ class VelodyneConfigurator:
                 print("Failed to restart sensor ... error code = " + str(code))
         return rc
 
+    def _validate_setting(self, config_setting, valid_setting, setting_name):
+        """Small helper function to check a velodyne settings.
+
+        """
+        if config_setting == valid_setting:
+          if self.verbose:
+            print("%s is set correctly to %s"%(setting_name, config_setting))
+          return True
+        else:
+          if not self.quiet:
+            print("%s is set to %s not %s"%(setting_name, config_setting, valid_setting))
+          return False
+
+    def validate_stencil_pro_velodyne(self):
+        valid = {
+                  "active_net": {
+                    "addr": "10.20.27.4",
+                    "dhcp": "Off",
+                    "gateway": "10.20.27.1",
+                    "mask": "255.255.255.0"
+                  },
+                  "host": {
+                    "addr": "10.20.27.1",
+                    "dport": "2368",
+                    "tport": "8308",
+                  },
+                  "laser": "On",
+                  "returns": "Strongest",
+                  "rpm": 600
+                }
+
+        (response, config) = self.get_json('settings.json')
+        retval = False
+
+        #We *could* do a deep compare for a sub dict but that doesn't
+        #exist in base python and it isn't worth implementing now.
+        if response:
+          retval = True
+
+          retval &= self._validate_setting(config["laser"], valid["laser"], "laser")
+          retval &= self._validate_setting(config["returns"], valid["returns"], "returns")
+          retval &= self._validate_setting(config["rpm"], valid["rpm"], "rpm")
+          retval &= self._validate_setting(config["host"]["addr"], valid["host"]["addr"], "host/addr")
+          retval &= self._validate_setting(config["host"]["dport"], valid["host"]["dport"], "host/dport")
+          retval &= self._validate_setting(config["host"]["tport"], valid["host"]["tport"], "host/tport")
+          retval &= self._validate_setting(config["active_net"]["addr"], valid["active_net"]["addr"], "active_net/addr")
+          retval &= self._validate_setting(config["active_net"]["dhcp"], valid["active_net"]["dhcp"], "active_net/dhcp")
+          retval &= self._validate_setting(config["active_net"]["gateway"], valid["active_net"]["gateway"], "active_net/gateway")
+          retval &= self._validate_setting(config["active_net"]["mask"], valid["active_net"]["mask"], "active_net/addmaskr")
+        
+        return retval
+
+             
+
+
+
+        
+
+
+
     def setup_stencil_pro_velodyne(self):
         if not self.setup_settings(): return 1
         time.sleep(1)
@@ -289,23 +354,24 @@ class VelodyneConfigurator:
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Kaarta Velodyne communication tool', allow_abbrev=False, conflict_handler="resolve")
-    parser.add_argument('--ip_addr', type=str, nargs='?',
+    parser.add_argument('--ip-addr', type=str, nargs='?',
                         help='Specific IP address to connect to')
     parser.add_argument('--detect', action='store_true',
                         help='Use this to automatically determine the IP address of the system by listening on the default data port (self.data_port) for data')
-    parser.add_argument('--setup_defaults_stencil_pro', action='store_true',
+    parser.add_argument('--setup-defaults-stencil-pro', action='store_true',
                         help='Setup the velodyne for standard Kaarta usage')
-    parser.add_argument('--print_snapshot', action='store_true',
-                        help='Setup the velodyne for standard Kaarta usage')
+    parser.add_argument('--validate-defaults-stencil-pro', action='store_true',
+                        help='Check the velodyne for standard Kaarta usage',dest="validate")
     parser.add_argument('--quiet', action='store_true',
                         help='Only output necessary data, such as detected ip when using --detect')
     parser.add_argument('--verbose', action='store_true',
                         help='Output extra debugging info')
-    parser.add_argument('--print_serial', action='store_true', help='Print serial number', dest="print_serial")
-    parser.add_argument('--print_model', action='store_true', help='Print model number', dest="print_model")
-    parser.add_argument('--print_info', action='store_true', help='Print sensor info', dest="print_info")
-    parser.add_argument('--print_diag', action='store_true', help='Print sensor diag', dest="print_diag")
-    parser.add_argument('--print_snapshot', action='store_true', help='Print sensor snapshot', dest="print_snapshot")
+    parser.add_argument('--print-serial', action='store_true', help='Print serial number', dest="print_serial")
+    parser.add_argument('--print-model', action='store_true', help='Print model number', dest="print_model")
+    parser.add_argument('--print-info', action='store_true', help='Print sensor info', dest="print_info")
+    parser.add_argument('--print-diag', action='store_true', help='Print sensor diag', dest="print_diag")
+    parser.add_argument('--print-snapshot', action='store_true', help='Print sensor snapshot', dest="print_snapshot")
+    parser.add_argument('--print-config', action='store_true', help='Print sensor config')
     args = parser.parse_args()
 
     if (args.ip_addr is None):
@@ -348,6 +414,23 @@ if __name__ == "__main__":
         else:
             print("Failed to get info")
             exit(1)
+
+    if (args.print_config):
+        (response, status) = config.get_json('settings.json')
+        if response:
+            pretty_print(status)
+            exit(0)
+        else:
+            print("Failed to get config")
+            exit(1)
+
+    if (args.validate):
+        if (args.verbose):
+            print("Checking for stencil pro settings")
+        if config.validate_stencil_pro_velodyne():
+          exit(0)
+        else:
+          exit(1)
 
     if (args.print_snapshot):
         (response, status) = config.get_json('snapshot.hdl')
