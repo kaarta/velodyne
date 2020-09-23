@@ -1,6 +1,6 @@
 # build the driver node
 add_executable(pcap_to_bag pcap_to_bag.cc)
-add_dependencies(pcap_to_bag velodyne_driver_gencfg)
+add_dependencies(pcap_to_bag velodyne_msgs_gencpp)
 target_link_libraries(pcap_to_bag
   ${catkin_LIBRARIES}
   ${libpcap_LIBRARIES}
