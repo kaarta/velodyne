@@ -58,8 +58,7 @@ namespace velodyne_rawdata
   /** @todo make this work for both big and little-endian machines */
   static const uint16_t UPPER_BANK = 0xeeff;
   static const uint16_t LOWER_BANK = 0xddff;
-  
-  
+
   /** Special Defines for VLP16 support **/
   static const int    VLP16_FIRINGS_PER_BLOCK =   2;
   static const int    VLP16_SCANS_PER_FIRING  =  16;
@@ -78,7 +77,6 @@ namespace velodyne_rawdata
   static const float  HDL32E_DSR_TOFFSET       =   1.152 * 1e-6;   // [µs]
   static const float  HDL32E_FIRING_TOFFSET    =  46.080 * 1e-6;   // [µs]
   static const float  HDL32E_BLOCK_TDURATION   =  HDL32E_FIRING_TOFFSET;   // [µs]
-  
 
   /** \brief Raw Velodyne data block.
    *
@@ -126,7 +124,7 @@ namespace velodyne_rawdata
   {
     raw_block_t blocks[BLOCKS_PER_PACKET];
     uint16_t revolution;
-    uint8_t status[PACKET_STATUS_SIZE]; 
+    uint8_t status[PACKET_STATUS_SIZE];
   } raw_packet_t;
 
   /** \brief Velodyne data conversion class */
@@ -148,10 +146,10 @@ namespace velodyne_rawdata
      *  @returns 0 if successful;
      *           errno value for failure
      */
-    int setup(ros::NodeHandle private_nh);
+    int setup(ros::NodeHandle &private_nh);
 
     int setupOffline(int _model, std::string _calibration, bool _upward);
-    bool offline_setup;
+    bool offline_setup_;
 
     /** \brief set up the laser configuration files using an integer laser model
      * @param laser_model
@@ -160,13 +158,13 @@ namespace velodyne_rawdata
      *   2 = HDL-32e
      * @returns true if model is one of the accepted types. False otherwise
      */
-    bool configureLaserParams(int laser_model, bool dual_mode, bool override = false);
+    bool configureLaserParams(int in_laser_model, bool dual_mode, bool override = false);
 
     void unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
     void unpackRAW_vlp16(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
-    
+
     void unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
-    
+
     void setParameters(double min_range, double max_range, double view_direction,
                        double view_width);
 
@@ -185,7 +183,7 @@ namespace velodyne_rawdata
       double min_range;                ///< minimum range to publish
       int min_angle;                   ///< minimum angle to publish
       int max_angle;                   ///< maximum angle to publish
-      
+
       double tmp_min_angle;
       double tmp_max_angle;
       uint8_t expected_factory_byte;
@@ -194,20 +192,23 @@ namespace velodyne_rawdata
     } Config;
     Config config_;
 
+    ros::NodeHandle* nh_private_ptr_;
 
     /** Upward or downward mount*/
-    bool upward;
+    bool upward_;
 
     bool buildTimings();
 
-    /** 
+    /**
      * Calibration file
      */
     velodyne_pointcloud::Calibration calibration_;
     float sin_rot_table_[ROTATION_MAX_UNITS];
     float cos_rot_table_[ROTATION_MAX_UNITS];
-    
-    /** add private function to handle the VLP16 **/ 
+
+    void modelDetection(const velodyne_msgs::VelodynePacket &pkt);
+
+    /** add private function to handle the VLP16 **/
     void unpack_vlp16(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp);
 
     /** in-line test whether a point is in range */
@@ -217,10 +218,8 @@ namespace velodyne_rawdata
               && range <= config_.max_range);
     }
 
-    int last_azimuth_diff;
-
-    std::vector<std::vector<float> > timing_offsets;
-    int laser_model;
+    std::vector<std::vector<float> > timing_offsets_;
+    int laser_model_;
     int laser_model_forced_;
 
     bool initialized_;

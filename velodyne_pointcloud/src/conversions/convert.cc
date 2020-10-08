@@ -60,7 +60,7 @@ namespace velodyne_pointcloud
 {
   using namespace diagnostic_updater;
   /** @brief Constructor. */
-  Convert::Convert(ros::NodeHandle node, ros::NodeHandle private_nh):
+  Convert::Convert(ros::NodeHandle &node, ros::NodeHandle &private_nh):
     data_(new velodyne_rawdata::RawData()),
     init_success(true)
   {

@@ -34,6 +34,7 @@
 
 #include <velodyne_pointcloud/rawdata.h>
 #include <kaarta_io/ScanInfoManagerClient.hpp>
+#include <thread>
 
 namespace velodyne_rawdata
 {
@@ -43,13 +44,13 @@ namespace velodyne_rawdata
   //
   ////////////////////////////////////////////////////////////////////////
 
-  RawData::RawData() : 
-    last_azimuth_diff(20),
-    offline_setup(false),
-    initialized_(false)
+  RawData::RawData() :
+    offline_setup_(true),
+    initialized_(false),
+    nh_private_ptr_(NULL)
   {
   }
-  
+
   /** Update parameters: conversions and update */
   void RawData::setParameters(double min_range,
                               double max_range,
@@ -63,13 +64,13 @@ namespace velodyne_rawdata
     //converting angle parameters into the velodyne reference (rad)
     config_.tmp_min_angle = view_direction + view_width/2;
     config_.tmp_max_angle = view_direction - view_width/2;
-    
+
     //computing positive modulo to keep theses angles into [0;2*M_PI]
     config_.tmp_min_angle = fmod(fmod(config_.tmp_min_angle,2*M_PI) + 2*M_PI,2*M_PI);
     config_.tmp_max_angle = fmod(fmod(config_.tmp_max_angle,2*M_PI) + 2*M_PI,2*M_PI);
-    
+
     //converting into the hardware velodyne ref (negative yaml and degrees)
-    //adding 0.5 perfomrs a centered double to int conversion 
+    //adding 0.5 perfomrs a centered double to int conversion
     config_.min_angle = 100 * (2*M_PI - config_.tmp_min_angle) * 180 / M_PI + 0.5;
     config_.max_angle = 100 * (2*M_PI - config_.tmp_max_angle) * 180 / M_PI + 0.5;
     if (config_.min_angle == config_.max_angle)
@@ -80,19 +81,19 @@ namespace velodyne_rawdata
     }
   }
 
-  bool RawData::configureLaserParams(int laser_model_, bool dual_mode, bool override){
+  bool RawData::configureLaserParams(int in_laser_model, bool dual_mode, bool override){
     bool res = true;
-    ROS_INFO("Configuring laser_model to: %d. Dual mode: %d. Override = %d", laser_model_, dual_mode, override);
-    laser_model = laser_model_;
+    ROS_INFO("Configuring laser_model to: %d. Dual mode: %d. Override = %d", in_laser_model, dual_mode, override);
+    laser_model_ = in_laser_model;
 
-    if (!offline_setup)
+    if (!offline_setup_)
     {
       int force_laser_model = -1;
-      if (ros::param::get("/force_laser_model", force_laser_model))
+      if (nh_private_ptr_->getParam("/force_laser_model", force_laser_model))
       {
-        laser_model = force_laser_model;
+        laser_model_ = force_laser_model;
         laser_model_forced_ = true;
-        ROS_WARN("Forcing use of laser model %d in rawdata", laser_model);
+        ROS_WARN("Forcing use of laser model %d in rawdata", laser_model_);
       }
       else
       {
@@ -101,16 +102,20 @@ namespace velodyne_rawdata
     }
 
     if (override){
-      if (!offline_setup)
+      if (!offline_setup_)
       {
         ROS_INFO("Setting scan info values for laser model");
         // set the parameter and log the change
-        Kaarta::ScanInfoManagerROSClient client;
-        if (client.init(true)){
-          client.publishFormatStr("/adjusted_laser_model", "true");
-          client.publishFormatStr("/laser_model", "%d", laser_model);
-        }
-        ros::param::set("/laser_model", laser_model);
+
+        std::thread t([this](){
+          Kaarta::ScanInfoManagerROSClient client;
+          if (client.init(true)){
+            client.publishFormatStr("/adjusted_laser_model", "true");
+            client.publishFormatStr("/laser_model", "%d", laser_model_);
+          }
+        });
+        t.detach();
+        nh_private_ptr_->setParam("/laser_model", laser_model_);
       }
     }
 
@@ -119,22 +124,22 @@ namespace velodyne_rawdata
     config_.expected_factory_byte = (uint8_t) 0;
     std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
     std::string fallbackCalibrationFile;
-    if (laser_model == Kaarta::StencilConstants::TYPE_VLP16){
+    if (laser_model_ == Kaarta::StencilConstants::TYPE_VLP16){
       ROS_INFO("Setting up a VLP16 driver");
       fallbackCalibrationFile = pkgPath + "/params/VLP16db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x22;
     }
-    else if (laser_model == Kaarta::StencilConstants::TYPE_VLP32){
+    else if (laser_model_ == Kaarta::StencilConstants::TYPE_VLP32){
       ROS_INFO("Setting up a VLP32 driver");
       fallbackCalibrationFile = pkgPath + "/params/VeloView-VLP-32C.yaml";
       config_.expected_factory_byte = (uint8_t) 0x28;
     }
-    else if (laser_model == Kaarta::StencilConstants::TYPE_HDL32){
+    else if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32){
       ROS_INFO("Setting up an HDL32 driver");
       fallbackCalibrationFile = pkgPath + "/params/32db.yaml";
       config_.expected_factory_byte = (uint8_t) 0x21;
     }
-    else if (laser_model == Kaarta::StencilConstants::TYPE_HDL64E){
+    else if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL64E){
       fallbackCalibrationFile = pkgPath + "/params/64e_utexas.yaml";
       config_.expected_factory_byte = (uint8_t) 0;
     }
@@ -151,10 +156,10 @@ namespace velodyne_rawdata
         ROS_ERROR("Calibration file does not exist: %s", config_.calibrationFile.c_str());
     }
     ROS_INFO("Setting calibration file to: %s", calibToUse.c_str());
-    
+
     calibration_.read(calibToUse);
     if (!calibration_.initialized) {
-      ROS_ERROR_STREAM("Unable to open calibration file: " << 
+      ROS_ERROR_STREAM("Unable to open calibration file: " <<
           calibToUse);
       res = false;
     }
@@ -173,30 +178,31 @@ namespace velodyne_rawdata
   }
 
   /** Set up for on-line operation. */
-  int RawData::setup(ros::NodeHandle private_nh)
+  int RawData::setup(ros::NodeHandle& private_nh)
   {
+    nh_private_ptr_ = &private_nh;
     ROS_INFO("Setting up online");
-    offline_setup = false;
+    offline_setup_ = false;
     int res = 0;
     // set laser parameters
-    laser_model = Kaarta::StencilConstants::TYPE_VLP16;
-    if (!private_nh.getParam("/laser_model", laser_model))
+    laser_model_ = Kaarta::StencilConstants::TYPE_VLP16;
+    if (!private_nh.getParam("/laser_model", laser_model_))
     {
-      ROS_ERROR("No laser model parameter set. Using: %d", laser_model);
+      ROS_ERROR("No laser model parameter set. Using: %d", laser_model_);
     }
     laser_model_forced_ = false;
-    if (private_nh.getParam("/force_laser_model", laser_model))
+    if (private_nh.getParam("/force_laser_model", laser_model_))
     {
       laser_model_forced_ = true;
-      ROS_WARN("Forcing use of laser_model to %d in rawdata", laser_model);
+      ROS_WARN("Forcing use of laser_model to %d in rawdata", laser_model_);
     }
     if (!private_nh.getParam("calibration", config_.calibrationFile))
     {
       ROS_ERROR("Failed to read calibration file parameter. Falling back to model specific calibration");
       // res = 1;
     }
-    if (!configureLaserParams(laser_model, false, true)){
-      ROS_WARN("Failed to configure laser params to laser model: %d", laser_model);
+    if (!configureLaserParams(laser_model_, false, true)){
+      ROS_WARN("Failed to configure laser params to laser model: %d", laser_model_);
       res = 2;
     }
 
@@ -211,12 +217,12 @@ namespace velodyne_rawdata
       config_.publish_nan_points = false;
 
 
-    if (!private_nh.getParam("upward", upward))
+    if (!private_nh.getParam("upward", upward_))
     {
       ROS_WARN_STREAM("No mounting direction specified! Using upward mounting!");
 
       // use default upward mounting direction
-      upward = true;
+      upward_ = true;
     }
 
     initialized_ = (res == 0);
@@ -227,17 +233,17 @@ namespace velodyne_rawdata
   int RawData::setupOffline(int _model, std::string _calibration, bool _upward)
   {
     ROS_INFO("Setting up offline");
-    offline_setup = true;
+    offline_setup_ = true;
 
     int res = 0;
     // set laser parameters
-    laser_model = _model;
+    laser_model_ = _model;
     config_.calibrationFile = _calibration;
-    upward = _upward;
+    upward_ = _upward;
 
-    if (!configureLaserParams(laser_model, false)){
+    if (!configureLaserParams(laser_model_, false)){
       res = 2;
-      ROS_WARN("Failed to configure laser params to laser model: %d", laser_model);
+      ROS_WARN("Failed to configure laser params to laser model: %d", laser_model_);
     }
 
     initialized_ = (res == 0);
@@ -248,19 +254,19 @@ namespace velodyne_rawdata
 
   bool RawData::buildTimings(){
     // vlp16
-    if (laser_model == Kaarta::StencilConstants::TYPE_VLP16){
+    if (laser_model_ == Kaarta::StencilConstants::TYPE_VLP16){
       // timing table calculation, from velodyne user manual
-      timing_offsets.resize(BLOCKS_PER_PACKET);
-      for (size_t i=0; i < timing_offsets.size(); ++i){
-        timing_offsets[i].resize(32);
+      timing_offsets_.resize(BLOCKS_PER_PACKET);
+      for (size_t i=0; i < timing_offsets_.size(); ++i){
+        timing_offsets_[i].resize(32);
       }
       // constants
       double full_firing_cycle = VLP16_FIRING_TOFFSET; // seconds
       double single_firing = VLP16_DSR_TOFFSET; // seconds
       double dataBlockIndex, dataPointIndex;
       // compute timing offsets
-      for (size_t x = 0; x < timing_offsets.size(); ++x){
-        for (size_t y = 0; y < timing_offsets[x].size(); ++y){
+      for (size_t x = 0; x < timing_offsets_.size(); ++x){
+        for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
           if (config_.dual_return_mode){
             dataBlockIndex = (x - (x % 2)) + (y / 16);
           }
@@ -269,24 +275,24 @@ namespace velodyne_rawdata
           }
           dataPointIndex = y % 16;
           //timing_offsets[block][firing]
-          timing_offsets[x][y] = (full_firing_cycle * dataBlockIndex) + (single_firing * dataPointIndex);
+          timing_offsets_[x][y] = (full_firing_cycle * dataBlockIndex) + (single_firing * dataPointIndex);
         }
       }
     }
     // vlp32
-    else if (laser_model == Kaarta::StencilConstants::TYPE_VLP32){
+    else if (laser_model_ == Kaarta::StencilConstants::TYPE_VLP32){
       // timing table calculation, from velodyne user manual
-      timing_offsets.resize(BLOCKS_PER_PACKET);
-      for (size_t i=0; i < timing_offsets.size(); ++i){
-        timing_offsets[i].resize(VLP32C_SCANS_PER_FIRING);
+      timing_offsets_.resize(BLOCKS_PER_PACKET);
+      for (size_t i=0; i < timing_offsets_.size(); ++i){
+        timing_offsets_[i].resize(VLP32C_SCANS_PER_FIRING);
       }
       // constants
       double full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
       double single_firing = VLP32C_DSR_TOFFSET; // seconds
       double dataBlockIndex, dataPointIndex;
       // compute timing offsets
-      for (size_t x = 0; x < timing_offsets.size(); ++x){
-        for (size_t y = 0; y < timing_offsets[x].size(); ++y){
+      for (size_t x = 0; x < timing_offsets_.size(); ++x){
+        for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
           if (config_.dual_return_mode){
             dataBlockIndex = x / 2;
           }
@@ -294,24 +300,24 @@ namespace velodyne_rawdata
             dataBlockIndex = x;
           }
           dataPointIndex = y / 2;
-          timing_offsets[x][y] = (full_firing_cycle * dataBlockIndex) + (single_firing * dataPointIndex);
+          timing_offsets_[x][y] = (full_firing_cycle * dataBlockIndex) + (single_firing * dataPointIndex);
         }
       }
     }
     // hdl32
-    else if (laser_model == Kaarta::StencilConstants::TYPE_HDL32){
+    else if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32){
       // timing table calculation, from velodyne user manual
-      timing_offsets.resize(BLOCKS_PER_PACKET);
-      for (size_t i=0; i < timing_offsets.size(); ++i){
-        timing_offsets[i].resize(HDL32E_SCANS_PER_FIRING);
+      timing_offsets_.resize(BLOCKS_PER_PACKET);
+      for (size_t i=0; i < timing_offsets_.size(); ++i){
+        timing_offsets_[i].resize(HDL32E_SCANS_PER_FIRING);
       }
       // constants
       double full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
       double single_firing = HDL32E_DSR_TOFFSET; // seconds
       double dataBlockIndex, dataPointIndex;
       // compute timing offsets
-      for (size_t x = 0; x < timing_offsets.size(); ++x){
-        for (size_t y = 0; y < timing_offsets[x].size(); ++y){
+      for (size_t x = 0; x < timing_offsets_.size(); ++x){
+        for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
           if (config_.dual_return_mode){
             dataBlockIndex = x / 2;
           }
@@ -319,21 +325,21 @@ namespace velodyne_rawdata
             dataBlockIndex = x;
           }
           dataPointIndex = y / 2;
-          timing_offsets[x][y] = (full_firing_cycle * dataBlockIndex) + (single_firing * dataPointIndex);
+          timing_offsets_[x][y] = (full_firing_cycle * dataBlockIndex) + (single_firing * dataPointIndex);
         }
       }
     }
     else{
-      timing_offsets.clear();
+      timing_offsets_.clear();
     }
 
-    if (timing_offsets.size()){
+    if (timing_offsets_.size()){
       std::stringstream ss;
       // ROS_INFO("VELODYNE TIMING TABLE:");
-      for (size_t x = 0; x < timing_offsets.size(); ++x){
-        for (size_t y = 0; y < timing_offsets[x].size(); ++y){
+      for (size_t x = 0; x < timing_offsets_.size(); ++x){
+        for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
           // printf("%04.3f ", timing_offsets[x][y] * 1e6);
-          ss << std::fixed << std::setw(7) << std::setprecision(3) << timing_offsets[x][y] * 1e6 << " " ;
+          ss << std::fixed << std::setw(7) << std::setprecision(3) << timing_offsets_[x][y] * 1e6 << " " ;
         }
         ss << std::endl;
       }
@@ -346,15 +352,8 @@ namespace velodyne_rawdata
     return true;
   }
 
-  /** @brief convert raw packet to point cloud
-   *
-   *  @param pkt raw packet to unpack
-   *  @param pc shared pointer to point cloud (points are appended)
-   */
-  void RawData::unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp)
+  void RawData::modelDetection(const velodyne_msgs::VelodynePacket &pkt)
   {
-    // ROS_WARN_STREAM("Received packet, time: " << pkt.stamp <<" scan begin time = "<<scan_begin_stamp << "diff = " << (scan_begin_stamp - pkt.stamp));
-
     bool pkt_dual_mode = pkt.data[0x4b4] == 0x39;
     if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
       switch(pkt.data[0x4b4])
@@ -370,36 +369,70 @@ namespace velodyne_rawdata
           break;
       }
     }
-    
+
     if (pkt.data[0x4b5] != config_.expected_factory_byte || pkt_dual_mode != config_.dual_return_mode){
       if (laser_model_forced_)
       {
-        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected model: %#02x. Data packet gives: %#02x", laser_model, config_.expected_factory_byte, pkt.data[0x4b5]);
-        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected Dual mode = %d. Dual mode = %d", laser_model, config_.dual_return_mode, pkt_dual_mode);
+        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected model: %#02x. Data packet gives: %#02x", laser_model_, config_.expected_factory_byte, pkt.data[0x4b5]);
+        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected Dual mode = %d. Dual mode = %d", laser_model_, config_.dual_return_mode, pkt_dual_mode);
       }
       else
       {
         ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
         ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
+        int detected_model = -1;
         switch(pkt.data[0x4b5]){
           case 0x22:
-            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: ");
-            configureLaserParams(Kaarta::StencilConstants::TYPE_VLP16, pkt_dual_mode, true);
+            detected_model = Kaarta::StencilConstants::TYPE_VLP16;
             break;
           case 0x28:
-            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1");
-            configureLaserParams(Kaarta::StencilConstants::TYPE_VLP32, pkt_dual_mode, true);
+            detected_model = Kaarta::StencilConstants::TYPE_VLP32;
             break;
           case 0x21:
-            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2");
-            configureLaserParams(Kaarta::StencilConstants::TYPE_HDL32, pkt_dual_mode, true);
+            detected_model = Kaarta::StencilConstants::TYPE_HDL32;
             break;
           default:
             ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
             exit(1);
         }
+        if (detected_model != -1)
+        {
+          if (detected_model != laser_model_ || config_.dual_return_mode != pkt_dual_mode)
+          {
+            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to %d with dual return mode: %d", detected_model, pkt_dual_mode);
+            configureLaserParams(detected_model, pkt_dual_mode, true);
+          }
+        }
       }
     }
+
+    if ( !offline_setup_ )
+    {
+      int laser_model_tmp = -1;
+      // ROS_INFO_STREAM("Checking laser model: currently " << laser_model_);
+      if (nh_private_ptr_->getParamCached("/laser_model", laser_model_tmp))
+      {
+        // ROS_INFO_STREAM("Got laser_model param: " << laser_model_tmp);
+        if (laser_model_tmp != laser_model_)
+        {
+          ROS_WARN_STREAM("Setting laser_model param: " << laser_model_tmp);
+          nh_private_ptr_->setParam("/laser_model", laser_model_);
+        }
+      }
+    }
+  }
+
+  /** @brief convert raw packet to point cloud
+   *
+   *  @param pkt raw packet to unpack
+   *  @param pc shared pointer to point cloud (points are appended)
+   */
+  void RawData::unpack(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp)
+  {
+    // ROS_WARN_STREAM("Received packet, time: " << pkt.stamp <<" scan begin time = "<<scan_begin_stamp << "diff = " << (scan_begin_stamp - pkt.stamp));
+
+    // detect the model using the packet bytes
+    modelDetection(pkt);
 
     /** special parsing for the VLP16 **/
     if (calibration_.num_lasers == 16)
@@ -410,6 +443,7 @@ namespace velodyne_rawdata
 
     velodyne_rawdata::VPoint point;
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
+    int last_azimuth_diff = 20;
 
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
 
@@ -429,7 +463,7 @@ namespace velodyne_rawdata
       float full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
       float single_firing = VLP32C_DSR_TOFFSET; // seconds
       float block_duration = VLP32C_BLOCK_TDURATION;
-      if (laser_model == Kaarta::StencilConstants::TYPE_HDL32){
+      if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32){
         full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
         single_firing = HDL32E_DSR_TOFFSET; // seconds
         block_duration = HDL32E_BLOCK_TDURATION;
@@ -439,7 +473,7 @@ namespace velodyne_rawdata
       if (block < (BLOCKS_PER_PACKET-block_jump)){
         int raw_azimuth_diff = (int)(raw->blocks[block+block_jump].rotation) - (int)raw->blocks[block].rotation;
 
-        // some packets contain an angle overflow where azimuth_diff < 0 
+        // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)
         {
           raw_azimuth_diff = raw_azimuth_diff + 36000;
@@ -463,7 +497,7 @@ namespace velodyne_rawdata
         uint8_t laser_number;       ///< hardware laser number
 
         laser_number = j + bank_origin;
-        velodyne_pointcloud::LaserCorrection &corrections = 
+        velodyne_pointcloud::LaserCorrection &corrections =
           calibration_.laser_corrections[laser_number];
 
         /** Position Calculation */
@@ -488,7 +522,7 @@ namespace velodyne_rawdata
         azimuth_corrected = ((int)azimuth_corrected) % 36000;
         // ROS_ERROR_STREAM_COND(num > 1000, "Angle " << j <<": " << azimuth_corrected << " \t time = " << timing_offsets[block][j]);
         // if hdl32, rotate by 90 deg
-        if (laser_model == Kaarta::StencilConstants::TYPE_HDL32) {
+        if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32) {
           azimuth_corrected = (azimuth_corrected + 9000) % 36000;
         }
 
@@ -498,11 +532,11 @@ namespace velodyne_rawdata
 
         /*condition added to avoid calculating points which are not
           in the interesting defined area (min_angle < area < max_angle)*/
-        if ((azimuth_corrected >= config_.min_angle 
-             && azimuth_corrected <= config_.max_angle 
+        if ((azimuth_corrected >= config_.min_angle
+             && azimuth_corrected <= config_.max_angle
              && config_.min_angle < config_.max_angle)
-             ||(config_.min_angle > config_.max_angle 
-             && (azimuth_corrected <= config_.max_angle 
+             ||(config_.min_angle > config_.max_angle
+             && (azimuth_corrected <= config_.max_angle
              || azimuth_corrected >= config_.min_angle))){
           float distance = tmp.uint * corrections.distance_scale_m;
 
@@ -510,8 +544,8 @@ namespace velodyne_rawdata
           if (distance < 0.1)
           {
             if(config_.publish_nan_points){
-              if (timing_offsets.size())
-                point.time = timing_offsets[block][j] + time_diff_start_to_this_packet;
+              if (timing_offsets_.size())
+                point.time = timing_offsets_[block][j] + time_diff_start_to_this_packet;
 
               point.x = point.y = point.z = nanf("");
               point.ring = corrections.laser_ring;
@@ -531,51 +565,51 @@ namespace velodyne_rawdata
             float sin_vert_angle = corrections.sin_vert_correction;
             float cos_rot_correction = corrections.cos_rot_correction;
             float sin_rot_correction = corrections.sin_rot_correction;
-    
+
             // cos(a-b) = cos(a)*cos(b) + sin(a)*sin(b)
             // sin(a-b) = sin(a)*cos(b) - cos(a)*sin(b)
-            float cos_rot_angle = 
-              cos_rot_table_[azimuth_corrected] * cos_rot_correction + 
+            float cos_rot_angle =
+              cos_rot_table_[azimuth_corrected] * cos_rot_correction +
               sin_rot_table_[azimuth_corrected] * sin_rot_correction;
-            float sin_rot_angle = 
-              sin_rot_table_[azimuth_corrected] * cos_rot_correction - 
+            float sin_rot_angle =
+              sin_rot_table_[azimuth_corrected] * cos_rot_correction -
               cos_rot_table_[azimuth_corrected] * sin_rot_correction;
-    
+
             float horiz_offset = corrections.horiz_offset_correction;
             float vert_offset = corrections.vert_offset_correction;
-    
+
             // Compute the distance in the xy plane (w/o accounting for rotation)
             /**the new term of 'vert_offset * sin_vert_angle'
             * was added to the expression due to the mathemathical
             * model we used.
             */
             float xy_distance = distance * cos_vert_angle - vert_offset * sin_vert_angle;
-    
+
             // Calculate temporal X, use absolute value.
             float xx = xy_distance * sin_rot_angle - horiz_offset * cos_rot_angle;
             // Calculate temporal Y, use absolute value
             float yy = xy_distance * cos_rot_angle + horiz_offset * sin_rot_angle;
             if (xx < 0) xx=-xx;
             if (yy < 0) yy=-yy;
-      
+
             // Get 2points calibration values,Linear interpolation to get distance
             // correction for X and Y, that means distance correction use
             // different value at different distance
             float distance_corr_x = 0;
             float distance_corr_y = 0;
             if (corrections.two_pt_correction_available) {
-              distance_corr_x = 
+              distance_corr_x =
                 (corrections.dist_correction - corrections.dist_correction_x)
-                  * (xx - 2.4) / (25.04 - 2.4) 
+                  * (xx - 2.4) / (25.04 - 2.4)
                 + corrections.dist_correction_x;
               distance_corr_x -= corrections.dist_correction;
-              distance_corr_y = 
+              distance_corr_y =
                 (corrections.dist_correction - corrections.dist_correction_y)
                   * (yy - 1.93) / (25.04 - 1.93)
                 + corrections.dist_correction_y;
               distance_corr_y -= corrections.dist_correction;
             }
-    
+
             float distance_x = distance + distance_corr_x;
             /**the new term of 'vert_offset * sin_vert_angle'
             * was added to the expression due to the mathemathical
@@ -584,7 +618,7 @@ namespace velodyne_rawdata
             xy_distance = distance_x * cos_vert_angle - vert_offset * sin_vert_angle ;
             ///the expression wiht '-' is proved to be better than the one with '+'
             x = xy_distance * sin_rot_angle - horiz_offset * cos_rot_angle;
-    
+
             float distance_y = distance + distance_corr_y;
             xy_distance = distance_y * cos_vert_angle - vert_offset * sin_vert_angle ;
             /**the new term of 'vert_offset * sin_vert_angle'
@@ -592,7 +626,7 @@ namespace velodyne_rawdata
             * model we used.
             */
             y = xy_distance * cos_rot_angle + horiz_offset * sin_rot_angle;
-    
+
             // Using distance_y is not symmetric, but the velodyne manual
             // does this.
             /**the new term of 'vert_offset * cos_vert_angle'
@@ -600,29 +634,29 @@ namespace velodyne_rawdata
             * model we used.
             */
             z = distance_y * sin_vert_angle + vert_offset*cos_vert_angle;
-    
+
             /** Use standard ROS coordinate system (right-hand rule) */
             float x_coord = y;
             float y_coord = -x;
             float z_coord = z;
-    
+
             /** Intensity Calculation */
-    
+
             float min_intensity = corrections.min_intensity;
             float max_intensity = corrections.max_intensity;
-      
+
             float tmp_2 = (1 - corrections.focal_distance / 13100);
             float focal_offset = 256 * tmp_2 * tmp_2;
 
             float focal_slope = corrections.focal_slope;
-            intensity += focal_slope * (std::abs(focal_offset - 256 * 
+            intensity += focal_slope * (std::abs(focal_offset - 256 *
               (1 - static_cast<float>(tmp.uint)/65535)*(1 - static_cast<float>(tmp.uint)/65535)));
             intensity = (intensity < min_intensity) ? min_intensity : intensity;
             intensity = (intensity > max_intensity) ? max_intensity : intensity;
 
             // add point to cloud
             point.x = x_coord;
-            if (upward){
+            if (upward_){
               point.y = y_coord;
               point.z = z_coord;
             }
@@ -634,8 +668,8 @@ namespace velodyne_rawdata
             point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
             point.distance = distance;
             point.intensity = intensity;
-            if (timing_offsets.size())
-              point.time = timing_offsets[block][j] + time_diff_start_to_this_packet;
+            if (timing_offsets_.size())
+              point.time = timing_offsets_[block][j] + time_diff_start_to_this_packet;
 
             data.addPoint(point);
           }
@@ -644,7 +678,7 @@ namespace velodyne_rawdata
     }
     data.finalize();
   }
-  
+
   /** @brief convert raw VLP16 packet to point cloud
    *
    *  @param pkt raw packet to unpack
@@ -653,7 +687,7 @@ namespace velodyne_rawdata
   void RawData::unpack_vlp16(const velodyne_msgs::VelodynePacket &pkt, DataContainerBase& data, const ros::Time& scan_begin_stamp)
   {
     velodyne_rawdata::VPoint point;
-    
+
     float azimuth;
     float azimuth_diff;
     int raw_azimuth_diff;
@@ -687,7 +721,7 @@ namespace velodyne_rawdata
         raw_azimuth_diff = raw->blocks[block + block_jump].rotation - raw->blocks[block].rotation;
         azimuth_diff = (float)((36000 + raw_azimuth_diff)%36000);
 
-        // some packets contain an angle overflow where azimuth_diff < 0 
+        // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
         {
           ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block + block_jump].rotation);
@@ -708,8 +742,8 @@ namespace velodyne_rawdata
 
       for (int firing=0, k=0; firing < VLP16_FIRINGS_PER_BLOCK; firing++){
         for (int dsr=0; dsr < VLP16_SCANS_PER_FIRING; dsr++, k+=RAW_SCAN_SIZE){
-          
-          velodyne_pointcloud::LaserCorrection &corrections = 
+
+          velodyne_pointcloud::LaserCorrection &corrections =
             calibration_.laser_corrections[dsr];
 
           /** Position Calculation */
@@ -722,7 +756,7 @@ namespace velodyne_rawdata
 
           if (config_.dual_return_mode)
           {
-            point_time = timing_offsets[block][dsr] + time_diff_start_to_this_packet;
+            point_time = timing_offsets_[block][dsr] + time_diff_start_to_this_packet;
 
             // in dual return mode, the packets are in the order of Last (even blocks), Strongest/Second strongest (odd blocks)
             // If the second data block's return has a greater intensity than the first (ie last != strongest)
@@ -734,21 +768,21 @@ namespace velodyne_rawdata
             }
           }
           else{
-            point_time = timing_offsets[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+            point_time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
           }
 
           /** correct for the laser rotation as a function of timing during the firings **/
           azimuth_corrected_f = azimuth + (azimuth_diff * ((dsr*VLP16_DSR_TOFFSET) + (firing*VLP16_FIRING_TOFFSET)) / VLP16_BLOCK_TDURATION);
           // azimuth_corrected_f = azimuth + (azimuth_diff * time_offset);
           azimuth_corrected = ((int)round(azimuth_corrected_f)) % 36000;
-          
+
           /*condition added to avoid calculating points which are not
             in the interesting defined area (min_angle < area < max_angle)*/
-          if ((azimuth_corrected >= config_.min_angle 
-               && azimuth_corrected <= config_.max_angle 
+          if ((azimuth_corrected >= config_.min_angle
+               && azimuth_corrected <= config_.max_angle
                && config_.min_angle < config_.max_angle)
-               ||(config_.min_angle > config_.max_angle 
-               && (azimuth_corrected <= config_.max_angle 
+               ||(config_.min_angle > config_.max_angle
+               && (azimuth_corrected <= config_.max_angle
                || azimuth_corrected >= config_.min_angle))){
 
             // convert polar coordinates to Euclidean XYZ
@@ -759,8 +793,8 @@ namespace velodyne_rawdata
             if (distance < 0.1)
             {
               if(config_.publish_nan_points){
-                if (timing_offsets.size())
-                  point.time = timing_offsets[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+                if (timing_offsets_.size())
+                  point.time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
 
                 point.x = point.y = point.z = nanf("");
                 point.ring = corrections.laser_ring;
@@ -780,51 +814,51 @@ namespace velodyne_rawdata
               float sin_vert_angle = corrections.sin_vert_correction;
               float cos_rot_correction = corrections.cos_rot_correction;
               float sin_rot_correction = corrections.sin_rot_correction;
-      
+
               // cos(a-b) = cos(a)*cos(b) + sin(a)*sin(b)
               // sin(a-b) = sin(a)*cos(b) - cos(a)*sin(b)
-              float cos_rot_angle = 
-                cos_rot_table_[azimuth_corrected] * cos_rot_correction + 
+              float cos_rot_angle =
+                cos_rot_table_[azimuth_corrected] * cos_rot_correction +
                 sin_rot_table_[azimuth_corrected] * sin_rot_correction;
-              float sin_rot_angle = 
-                sin_rot_table_[azimuth_corrected] * cos_rot_correction - 
+              float sin_rot_angle =
+                sin_rot_table_[azimuth_corrected] * cos_rot_correction -
                 cos_rot_table_[azimuth_corrected] * sin_rot_correction;
-      
+
               float horiz_offset = corrections.horiz_offset_correction;
               float vert_offset = corrections.vert_offset_correction;
-      
+
               // Compute the distance in the xy plane (w/o accounting for rotation)
               /**the new term of 'vert_offset * sin_vert_angle'
               * was added to the expression due to the mathemathical
               * model we used.
               */
               float xy_distance = distance * cos_vert_angle - vert_offset * sin_vert_angle;
-      
+
               // Calculate temporal X, use absolute value.
               float xx = xy_distance * sin_rot_angle - horiz_offset * cos_rot_angle;
               // Calculate temporal Y, use absolute value
               float yy = xy_distance * cos_rot_angle + horiz_offset * sin_rot_angle;
               if (xx < 0) xx=-xx;
               if (yy < 0) yy=-yy;
-        
+
               // Get 2points calibration values,Linear interpolation to get distance
               // correction for X and Y, that means distance correction use
               // different value at different distance
               float distance_corr_x = 0;
               float distance_corr_y = 0;
               if (corrections.two_pt_correction_available) {
-                distance_corr_x = 
+                distance_corr_x =
                   (corrections.dist_correction - corrections.dist_correction_x)
-                    * (xx - 2.4) / (25.04 - 2.4) 
+                    * (xx - 2.4) / (25.04 - 2.4)
                   + corrections.dist_correction_x;
                 distance_corr_x -= corrections.dist_correction;
-                distance_corr_y = 
+                distance_corr_y =
                   (corrections.dist_correction - corrections.dist_correction_y)
                     * (yy - 1.93) / (25.04 - 1.93)
                   + corrections.dist_correction_y;
                 distance_corr_y -= corrections.dist_correction;
               }
-      
+
               float distance_x = distance + distance_corr_x;
               /**the new term of 'vert_offset * sin_vert_angle'
               * was added to the expression due to the mathemathical
@@ -832,7 +866,7 @@ namespace velodyne_rawdata
               */
               xy_distance = distance_x * cos_vert_angle - vert_offset * sin_vert_angle ;
               x = xy_distance * sin_rot_angle - horiz_offset * cos_rot_angle;
-      
+
               float distance_y = distance + distance_corr_y;
               /**the new term of 'vert_offset * sin_vert_angle'
               * was added to the expression due to the mathemathical
@@ -840,7 +874,7 @@ namespace velodyne_rawdata
               */
               xy_distance = distance_y * cos_vert_angle - vert_offset * sin_vert_angle ;
               y = xy_distance * cos_rot_angle + horiz_offset * sin_rot_angle;
-      
+
               // Using distance_y is not symmetric, but the velodyne manual
               // does this.
               /**the new term of 'vert_offset * cos_vert_angle'
@@ -848,28 +882,28 @@ namespace velodyne_rawdata
               * model we used.
               */
               z = distance_y * sin_vert_angle + vert_offset*cos_vert_angle;
-      
+
               /** Use standard ROS coordinate system (right-hand rule) */
               float x_coord = y;
               float y_coord = -x;
               float z_coord = z;
-      
+
               /** Intensity Calculation */
               float min_intensity = corrections.min_intensity;
               float max_intensity = corrections.max_intensity;
-      
+
               float tmp_2 = (1 - corrections.focal_distance / 13100);
-      
+
               float focal_offset = 256 * tmp_2 * tmp_2;
               float focal_slope = corrections.focal_slope;
-              intensity += focal_slope * (std::abs(focal_offset - 256 * 
+              intensity += focal_slope * (std::abs(focal_offset - 256 *
                 (1 - tmp.uint/65535)*(1 - tmp.uint/65535)));
               intensity = (intensity < min_intensity) ? min_intensity : intensity;
               intensity = (intensity > max_intensity) ? max_intensity : intensity;
 
               // add point to cloud
               point.x = x_coord;
-              if (upward){
+              if (upward_){
                 point.y = y_coord;
                 point.z = z_coord;
               }
@@ -881,8 +915,8 @@ namespace velodyne_rawdata
               point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of deg to rad
               point.distance = distance;
               point.intensity = intensity;
-              if (timing_offsets.size())
-                point.time = timing_offsets[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+              if (timing_offsets_.size())
+                point.time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
 
               data.addPoint(point);
             }
@@ -896,44 +930,9 @@ namespace velodyne_rawdata
   void RawData::unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& data, const ros::Time& scan_begin_stamp)
   {
     // ROS_WARN_STREAM("Received packet, time: " << pkt.stamp <<" scan begin time = "<<scan_begin_stamp << "diff = " << (scan_begin_stamp - pkt.stamp));
-    
-    bool pkt_dual_mode = pkt.data[0x4b4] == 0x39;
-    if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
-      switch(pkt.data[0x4b4])
-      {
-        case 0x38:
-          ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (last)", pkt.data[0x4b4]);
-          break;
-        case 0x39:
-          ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (dual)", pkt.data[0x4b4]);
-          break;
-        default:
-          ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (unknown)", pkt.data[0x4b4]);
-          break;
-      }
-    }
-    
-    if (pkt.data[0x4b5] != config_.expected_factory_byte || pkt_dual_mode != config_.dual_return_mode){
-      ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
-      ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
-      switch(pkt.data[0x4b5]){
-        case 0x22:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 0 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP16, pkt_dual_mode, true);
-          break;
-        case 0x28:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 1 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(Kaarta::StencilConstants::TYPE_VLP32, pkt_dual_mode, true);
-          break;
-        case 0x21:
-          ROS_WARN_THROTTLE(1, "Adjusting laser_model param to 2 with dual return mode: %d", pkt_dual_mode);
-          configureLaserParams(Kaarta::StencilConstants::TYPE_HDL32, pkt_dual_mode, true);
-          break;
-        default:
-          ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
-          exit(1);
-      }
-    }
+
+    // detect the model using the packet bytes
+    modelDetection(pkt);
 
     /** special parsing for the VLP16 **/
     if (calibration_.num_lasers == 16)
@@ -945,12 +944,12 @@ namespace velodyne_rawdata
     float full_firing_cycle = VLP32C_FIRING_TOFFSET; // seconds
     float single_firing = VLP32C_DSR_TOFFSET; // seconds
     float block_duration = VLP32C_BLOCK_TDURATION;
-    if (laser_model == 2){
+    if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32){
       full_firing_cycle = HDL32E_FIRING_TOFFSET; // seconds
       single_firing = HDL32E_DSR_TOFFSET; // seconds
       block_duration = HDL32E_BLOCK_TDURATION;
     }
-    
+
     velodyne_rawdata::VPointRaw point;
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
 
@@ -973,7 +972,7 @@ namespace velodyne_rawdata
       if (block < (BLOCKS_PER_PACKET-1)){
         int raw_azimuth_diff = (int)(raw->blocks[block+1].rotation) - (int)raw->blocks[block].rotation;
 
-        // some packets contain an angle overflow where azimuth_diff < 0 
+        // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)
         {
           raw_azimuth_diff = raw_azimuth_diff + 36000;
@@ -995,7 +994,7 @@ namespace velodyne_rawdata
         uint8_t laser_number;       ///< hardware laser number
 
         laser_number = j + bank_origin;
-        velodyne_pointcloud::LaserCorrection &corrections = 
+        velodyne_pointcloud::LaserCorrection &corrections =
           calibration_.laser_corrections[laser_number];
 
         /** Position Calculation */
@@ -1008,7 +1007,7 @@ namespace velodyne_rawdata
         azimuth_corrected = ((int)azimuth_corrected) % 36000;
         // ROS_ERROR_STREAM_COND(num > 1000, "Angle " << j <<": " << azimuth_corrected << " \t time = " << timing_offsets[block][j]);
         // if hdl32, rotate by 90 deg
-        if (laser_model == 2) {
+        if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32) {
           azimuth_corrected = (azimuth_corrected + 9000) % 36000;
         }
 
@@ -1017,9 +1016,9 @@ namespace velodyne_rawdata
         point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
         point.distance = tmp.uint;
         point.intensity = raw->blocks[block].data[k+2];
-        if (timing_offsets.size())
+        if (timing_offsets_.size())
         {
-          point.time = timing_offsets[block][j] + time_diff_start_to_this_packet;
+          point.time = timing_offsets_[block][j] + time_diff_start_to_this_packet;
         }
         data->points.push_back(point);
       }
@@ -1029,9 +1028,9 @@ namespace velodyne_rawdata
   void RawData::unpackRAW_vlp16(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& data, const ros::Time& scan_begin_stamp)
   {
     velodyne_rawdata::VPointRaw point;
-    
+
     float last_azimuth_diff=0;
-    
+
     float time_diff_start_to_this_packet = (pkt.stamp - scan_begin_stamp).toSec();
     // ROS_WARN_STREAM("time diff scan to packet: " << time_diff_start_to_this_packet);
 
@@ -1055,7 +1054,7 @@ namespace velodyne_rawdata
         raw_azimuth_diff = raw->blocks[block+1].rotation - raw->blocks[block].rotation;
         azimuth_diff = (float)((36000 + raw_azimuth_diff)%36000);
 
-        // some packets contain an angle overflow where azimuth_diff < 0 
+        // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
         {
           ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block+1].rotation);
@@ -1074,8 +1073,8 @@ namespace velodyne_rawdata
 
       for (int firing=0, k=0; firing < VLP16_FIRINGS_PER_BLOCK; firing++){
         for (int dsr=0; dsr < VLP16_SCANS_PER_FIRING; dsr++, k+=RAW_SCAN_SIZE){
-          
-          velodyne_pointcloud::LaserCorrection &corrections = 
+
+          velodyne_pointcloud::LaserCorrection &corrections =
             calibration_.laser_corrections[dsr];
 
           /** Position Calculation */
@@ -1096,9 +1095,9 @@ namespace velodyne_rawdata
           point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
           point.distance = tmp.uint;
           point.intensity = raw->blocks[block].data[k+2];
-          if (timing_offsets.size())
+          if (timing_offsets_.size())
           {
-            point.time = timing_offsets[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+            point.time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
           }
           data->points.push_back(point);
         }
