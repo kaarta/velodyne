@@ -47,7 +47,8 @@ namespace velodyne_rawdata
   RawData::RawData() :
     offline_setup_(true),
     initialized_(false),
-    nh_private_ptr_(NULL)
+    nh_private_ptr_(NULL),
+    laser_model_forced_(false)
   {
   }
 
