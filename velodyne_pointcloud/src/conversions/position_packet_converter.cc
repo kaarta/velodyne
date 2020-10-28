@@ -55,6 +55,20 @@ namespace velodyne_pointcloud
       node.subscribe("velodyne_position_packets", 10,
                      &PositionPacketConverter::processPacket, (PositionPacketConverter *) this,
                      ros::TransportHints().tcpNoDelay(true));
+
+    diagnostics_.setHardwareID("Velodyne");
+    diag_timer_ = private_nh.createTimer(ros::Duration(0.5), &PositionPacketConverter::diagTimerCallback,this);
+    diagnostics_.add("Velodyne PPS status", this, &PositionPacketConverter::ppsStatus);
+    diagnostics_.add("Velodyne NMEA status", this, &PositionPacketConverter::nmeaStatus);
+
+    diag_min_freq_ = 10;
+    diag_max_freq_ = 200;
+    using namespace diagnostic_updater;
+    diag_position_topic_.reset(new TopicDiagnostic("Velodyne position packets convert", diagnostics_,
+                                      FrequencyStatusParam(&diag_min_freq_,
+                                                          &diag_max_freq_,
+                                                          0.05, 1),
+                                      TimeStampStatusParam(0.0, 0.5)));
   }
   
   bool PositionPacketConverter::initSuccessful(){
@@ -64,11 +78,15 @@ namespace velodyne_pointcloud
   /** @brief Callback for raw scan messages. */
   void PositionPacketConverter::processPacket(const velodyne_msgs::VelodynePositionPacket::ConstPtr &pkt)
   {
-    if (imu_output_pub_.getNumSubscribers() == 0 &&
-        gnss_raw_output_pub_.getNumSubscribers() == 0 &&
-        gnss_fix_output_pub_.getNumSubscribers() == 0 &&
-        pps_state_pub_.getNumSubscribers() == 0)
-      return;
+    diag_position_topic_->tick(pkt->stamp);
+
+    // if (imu_output_pub_.getNumSubscribers() == 0 &&
+    //     gnss_raw_output_pub_.getNumSubscribers() == 0 &&
+    //     gnss_fix_output_pub_.getNumSubscribers() == 0 &&
+    //     pps_state_pub_.getNumSubscribers() == 0)
+    //   return;
+
+    bool forceUpdate = false;
 
     private_nh_.getParamCached("/laser_model", laser_model_);
 
@@ -85,8 +103,7 @@ namespace velodyne_pointcloud
 
     std::string nmea_string((const char*)(&pkt->data[0] + 0xCE));
 
-    if (nmea_string != gnss_raw_data_->sentence &&
-       (gnss_fix_output_pub_.getNumSubscribers() || gnss_raw_output_pub_.getNumSubscribers()) )
+    if (nmea_string != gnss_raw_data_->sentence)
     {
       gnss_raw_data_.reset(new stencil_msgs::GPS_NMEA_Stamped());
       gnss_fix_data_.reset(new sensor_msgs::NavSatFix());
@@ -101,13 +118,18 @@ namespace velodyne_pointcloud
       gnss_raw_output_pub_.publish(gnss_raw_data_);
     }
 
-    if (pps_state_pub_.getNumSubscribers() && (pps_data_->state != pkt->data[0xCA] || fabs( (pkt->stamp - pps_data_->stamp).toSec() ) >= pps_output_delay_ ) )
+    if ( (pps_data_->state != pkt->data[0xCA] || fabs( (pkt->stamp - pps_data_->stamp).toSec() ) >= pps_output_delay_ ) )
     {
+      if (pps_data_->state != pkt->data[0xCA]){
+        forceUpdate = true;
+      }
       pps_data_.reset(new velodyne_msgs::VelodynePPS());
       pps_data_->state = pkt->data[0xCA];
       pps_data_->stamp = pkt->stamp;
       pps_state_pub_.publish(pps_data_);
     }
+    if (forceUpdate)
+      diagnostics_.force_update();
   }
 
   void PositionPacketConverter::parseNmeaString(const char * nmea_string, sensor_msgs::NavSatFix& nav_sat_fix){
@@ -136,7 +158,7 @@ namespace velodyne_pointcloud
       nav_sat_fix.latitude = - (int_lat+ (lat - int_lat)/0.6);
     }
     
-    ROS_DEBUG_STREAM("Velodyne packet latitude:" << nav_sat_fix.latitude);
+    // ROS_DEBUG_STREAM("Velodyne packet latitude:" << nav_sat_fix.latitude);
 
     //longitude
     float lon = strtof(tokens[5].c_str(), NULL)/100;
@@ -147,7 +169,7 @@ namespace velodyne_pointcloud
       nav_sat_fix.longitude = -(int_lon + (lon - int_lon)/0.6);
     }
 
-    ROS_DEBUG_STREAM("Velodyne packet longitude:" << nav_sat_fix.longitude);
+    // ROS_DEBUG_STREAM("Velodyne packet longitude:" << nav_sat_fix.longitude);
   }
 
   void PositionPacketConverter::parseImuData(const uint8_t *b, sensor_msgs::Imu& imu_data)
@@ -226,5 +248,51 @@ namespace velodyne_pointcloud
     // imu_data.header.stamp = parseInternalTime(*(b + 198), *(b + 199), *(b + 200), *(b + 201));
     imu_data.header.stamp = ros::Time::now();
     imu_data.header.frame_id = "velodyne";
+  }
+
+  void PositionPacketConverter::diagTimerCallback(const ros::TimerEvent&event)
+  {
+    diagnostics_.update();
+  }
+
+  void PositionPacketConverter::nmeaStatus(diagnostic_updater::DiagnosticStatusWrapper &stat){
+    stat.add("nmea string", gnss_raw_data_->sentence);
+    if (gnss_raw_data_->sentence.length() > 20)
+      stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "NMEA string length ok");
+    else
+      stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "NMEA string error");
+  }
+
+  void PositionPacketConverter::imuStatus(diagnostic_updater::DiagnosticStatusWrapper &stat){
+    stat.add("Laser Model", laser_model_);
+    stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Not checking IMU status");
+  }
+
+  void PositionPacketConverter::ppsStatus(diagnostic_updater::DiagnosticStatusWrapper &stat){
+    switch(pps_data_->state){
+      case velodyne_msgs::VelodynePPS::STATE_NO_PPS_DETECTED:
+        stat.add("PPS Status", "No PPS detected");
+        stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "No PPS detected");
+        ROS_WARN_THROTTLE(0.5, "No PPS Detected");
+        break;
+      case velodyne_msgs::VelodynePPS::STATE_SYNCHRONIZING_TO_PPS:
+        stat.add("PPS Status", "Synchronizing to PPS");
+        stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "Synchronizing to PPS");
+        ROS_WARN_THROTTLE(0.5, "Synchronizing PPS");
+        break;
+      case velodyne_msgs::VelodynePPS::STATE_PPS_LOCKED:
+        stat.add("PPS Status", "PPS Locked");
+        stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "PPS Locked");
+        break;
+      case velodyne_msgs::VelodynePPS::STATE_ERROR:
+        stat.add("PPS Status", "Error");
+        stat.summary(diagnostic_msgs::DiagnosticStatus::ERROR, "PPS Error");
+        ROS_WARN_THROTTLE(0.5, "PPS Error");
+        break;
+      default:
+        stat.add("PPS Status", pps_data_->state);
+        stat.summary(diagnostic_msgs::DiagnosticStatus::ERROR, "Unknown PPS status");
+        ROS_WARN_THROTTLE(0.5, "Unknown PPS Status");
+    };
   }
 } // namespace velodyne_pointcloud

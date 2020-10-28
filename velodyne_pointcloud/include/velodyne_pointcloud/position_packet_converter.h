@@ -26,6 +26,9 @@
 
 #include <velodyne_msgs/VelodynePositionPacket.h>
 
+#include <diagnostic_updater/diagnostic_updater.h>
+#include <diagnostic_updater/publisher.h>
+
 namespace velodyne_pointcloud
 {
   class PositionPacketConverter
@@ -68,6 +71,16 @@ namespace velodyne_pointcloud
 
     double pps_output_delay_;
 
+    // diagnostic info
+    void diagTimerCallback(const ros::TimerEvent&event);
+    void imuStatus(diagnostic_updater::DiagnosticStatusWrapper &stat);
+    void ppsStatus(diagnostic_updater::DiagnosticStatusWrapper &stat);
+    void nmeaStatus(diagnostic_updater::DiagnosticStatusWrapper &stat);
+    ros::Timer diag_timer_;
+    diagnostic_updater::Updater diagnostics_;
+    boost::shared_ptr<diagnostic_updater::TopicDiagnostic> diag_position_topic_;
+    double diag_min_freq_;
+    double diag_max_freq_;
 
     static constexpr const double gyroscopeScale = 0.09766 * M_PI / 180; // rad/sec
     // const double temperatureScale = 0.1453; // C
