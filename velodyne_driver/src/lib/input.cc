@@ -103,6 +103,7 @@ namespace velodyne_driver
   }
 
   uint8_t Input::getPPSStatus(){
+    std::unique_lock<std::mutex> lock(position_data_mutex_);
     return pps_status_;
   }
 
@@ -376,9 +377,9 @@ namespace velodyne_driver
               continue;
             else{
               pkt->stamp = parseInternalTime(&pkt->data[0] + 0xC6, ros::Time::now());
+              std::unique_lock<std::mutex> lock(position_data_mutex_);
               pps_status_ = *((const uint8_t*)(&(pkt->data[0]) + 0xCA));
 
-              std::unique_lock<std::mutex> lock(position_data_mutex_);
               last_position_packet_ = *pkt;
               break; //done
             }

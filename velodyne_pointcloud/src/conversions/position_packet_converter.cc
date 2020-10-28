@@ -23,13 +23,16 @@ namespace velodyne_pointcloud
 {
   /** @brief Constructor. */
   PositionPacketConverter::PositionPacketConverter(ros::NodeHandle& node, ros::NodeHandle& private_nh):
-    init_success(true), private_nh_(private_nh), laser_model_(-1)
+    init_success(true), private_nh_(private_nh), laser_model_(-1), pps_output_delay_(0.999)
   {
     private_nh.param<std::string>("imu_header", imu_frame_id_, "imu");
     private_nh.param<std::string>("gnss_header", gnss_frame_id_, "gnss");
-    private_nh.getParamCached("/laser_model", laser_model_);
+
+    private_nh.getParam("/laser_model", laser_model_);
+    private_nh.getParam("pps_output_delay_", pps_output_delay_);
 
     imu_data_.reset(new sensor_msgs::Imu());
+    pps_data_.reset(new velodyne_msgs::VelodynePPS());
     gnss_raw_data_.reset(new stencil_msgs::GPS_NMEA_Stamped());
     gnss_fix_data_.reset(new sensor_msgs::NavSatFix());
 
@@ -44,6 +47,8 @@ namespace velodyne_pointcloud
       node.advertise<stencil_msgs::GPS_NMEA_Stamped>("velodyne_gnss_raw", 10);
     gnss_fix_output_pub_ =
       node.advertise<sensor_msgs::NavSatFix>("velodyne_gnss_fix", 10);
+    pps_state_pub_ =
+      node.advertise<velodyne_msgs::VelodynePPS>("velodyne_pps_state", 10);
 
     // subscribe to VelodyneScan packets
     velodyne_packet_sub_ =
@@ -59,15 +64,19 @@ namespace velodyne_pointcloud
   /** @brief Callback for raw scan messages. */
   void PositionPacketConverter::processPacket(const velodyne_msgs::VelodynePositionPacket::ConstPtr &pkt)
   {
-    if (imu_output_pub_.getNumSubscribers() == 0 && gnss_raw_output_pub_.getNumSubscribers() == 0 && gnss_fix_output_pub_.getNumSubscribers() == 0)
+    if (imu_output_pub_.getNumSubscribers() == 0 &&
+        gnss_raw_output_pub_.getNumSubscribers() == 0 &&
+        gnss_fix_output_pub_.getNumSubscribers() == 0 &&
+        pps_state_pub_.getNumSubscribers() == 0)
       return;
 
     private_nh_.getParamCached("/laser_model", laser_model_);
 
     // ROS_INFO_STREAM("Got new position packet: " << pkt->stamp);
     // sensor_msgs::Imu::Ptr new_imu_ptr(new sensor_msgs::Imu());
-    if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32)
+    if (laser_model_ == Kaarta::StencilConstants::TYPE_HDL32 && imu_output_pub_.getNumSubscribers())
     {
+      imu_data_.reset(new sensor_msgs::Imu());
       parseImuData(&pkt->data[0], *imu_data_);
 
       imu_data_->header.stamp = pkt->stamp;
@@ -76,8 +85,12 @@ namespace velodyne_pointcloud
 
     std::string nmea_string((const char*)(&pkt->data[0] + 0xCE));
 
-    if (nmea_string != gnss_raw_data_->sentence)
+    if (nmea_string != gnss_raw_data_->sentence &&
+       (gnss_fix_output_pub_.getNumSubscribers() || gnss_raw_output_pub_.getNumSubscribers()) )
     {
+      gnss_raw_data_.reset(new stencil_msgs::GPS_NMEA_Stamped());
+      gnss_fix_data_.reset(new sensor_msgs::NavSatFix());
+
       parseNmeaString(nmea_string.c_str(), *gnss_fix_data_);
       gnss_fix_data_->header.stamp = pkt->stamp;
       gnss_fix_data_->status.status = 1;
@@ -86,6 +99,14 @@ namespace velodyne_pointcloud
       gnss_raw_data_->sentence = nmea_string;
       gnss_raw_data_->header.stamp = pkt->stamp;
       gnss_raw_output_pub_.publish(gnss_raw_data_);
+    }
+
+    if (pps_state_pub_.getNumSubscribers() && (pps_data_->state != pkt->data[0xCA] || fabs( (pkt->stamp - pps_data_->stamp).toSec() ) >= pps_output_delay_ ) )
+    {
+      pps_data_.reset(new velodyne_msgs::VelodynePPS());
+      pps_data_->state = pkt->data[0xCA];
+      pps_data_->stamp = pkt->stamp;
+      pps_state_pub_.publish(pps_data_);
     }
   }
 

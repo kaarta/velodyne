@@ -86,6 +86,8 @@ private:
 
   bool init_success;
 
+  uint8_t last_pps_status_;
+
   bool dual_return_;
   int force_laser_model_;
   void updateNPackets();

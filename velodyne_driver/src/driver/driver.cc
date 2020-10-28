@@ -29,7 +29,7 @@ namespace velodyne_driver
 {
 
 VelodyneDriver::VelodyneDriver(ros::NodeHandle node,
-                               ros::NodeHandle private_nh) : init_success(true)
+                               ros::NodeHandle private_nh) : init_success(true), last_pps_status_(-1)
 {
   // use private node handle to get parameters
   private_nh.param("frame_id", config_.frame_id, std::string("velodyne"));
@@ -510,8 +510,10 @@ bool VelodyneDriver::pollPosition(void){
     int rc = input_->getPositionPacket(&position_packet_, config_.time_offset);
     if (rc == 0){ // got a full packet?
       // if we aren't throttling publishing to only once per scan
-      if (!publish_position_packets_at_same_frequency_as_scans_){
+      auto new_pps_status = position_packet_.data[0xCA];
+      if (!publish_position_packets_at_same_frequency_as_scans_ || last_pps_status_ != new_pps_status){
         position_packet_pub_.publish(position_packet_);
+        last_pps_status_ = new_pps_status;
 
         // if we have new gps data, publish it
         // ROS_WARN("GPS data time stamp: " << gps_data_.header.stamp);

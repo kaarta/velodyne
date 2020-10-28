@@ -9,6 +9,7 @@ add_message_files(
   VelodynePacket.msg
   VelodynePositionPacket.msg
   VelodyneScan.msg
+  VelodynePPS.msg
 )
 generate_messages(DEPENDENCIES std_msgs)
 
