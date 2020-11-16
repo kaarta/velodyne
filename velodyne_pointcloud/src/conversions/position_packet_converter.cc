@@ -48,7 +48,7 @@ namespace velodyne_pointcloud
     gnss_fix_output_pub_ =
       node.advertise<sensor_msgs::NavSatFix>("velodyne_gnss_fix", 10);
     pps_state_pub_ =
-      node.advertise<velodyne_msgs::VelodynePPS>("velodyne_pps_state", 10);
+      node.advertise<velodyne_msgs::VelodynePPS>("velodyne_pps_state", 10, true);
 
     // subscribe to VelodyneScan packets
     velodyne_packet_sub_ =
