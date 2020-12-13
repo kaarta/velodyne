@@ -158,7 +158,7 @@ namespace velodyne_rawdata
      *   2 = HDL-32e
      * @returns true if model is one of the accepted types. False otherwise
      */
-    bool configureLaserParams(int in_laser_model, bool dual_mode, bool override = false);
+    bool configureLaserParams(int in_laser_model, uint8_t dual_mode, bool override = false);
 
     void unpackRAW(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
     void unpackRAW_vlp16(const velodyne_msgs::VelodynePacket &pkt, VPointCloudRaw::Ptr& pc, const ros::Time& scan_begin_stamp);
@@ -187,7 +187,7 @@ namespace velodyne_rawdata
       double tmp_min_angle;
       double tmp_max_angle;
       uint8_t expected_factory_byte;
-      bool dual_return_mode;
+      uint8_t return_type = 0;
       bool publish_nan_points;
     } Config;
     Config config_;

@@ -69,6 +69,8 @@ namespace velodyne_pointcloud
     void pointCountDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat);
 
     float last_rpm_, last_rpm_raw_;
+
+    bool remove_nan_;
     
     // A point cloud with same time and frame ID as raw data
     PointcloudXYZIADRT outMsg;

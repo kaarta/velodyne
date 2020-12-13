@@ -36,13 +36,18 @@ namespace velodyne_pointcloud
   /** Euclidean Velodyne coordinate, including intensity and ring number. */
   struct RawSensorPoint
   {
-    RawSensorPoint(){}
+    static const uint8_t LAST = 1;
+    static const uint8_t SECOND_STRONGEST = 2;
+    static const uint8_t STRONGEST = 4;
+
+    RawSensorPoint() : return_number(0){}
     uint8_t  intensity;
     float    azimuth;                   ///< laser azimuth in rad
     uint16_t distance;                  ///< laser distance reading
     uint16_t ring;                      ///< laser ring number
     uint8_t  laser_num;                 ///< laser ring number
     double   time;                      ///< point time reading (seconds since scan start)
+    uint8_t  return_number;             ///< return number, last = 1, second strongest = 2, strongest = 4, strongest & last (bitwise) = 5
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW     // ensure proper alignment
   } EIGEN_ALIGN16;
@@ -63,6 +68,7 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_pointcloud::RawSensorPoint,
                                   (uint16_t, distance, distance)
                                   (uint16_t, ring, ring)
                                   (double, time, time)
+                                  (uint8_t, return_number, return_number)
                                   );
 
 #endif // __VELODYNE_POINTCLOUD_POINT_TYPES_H

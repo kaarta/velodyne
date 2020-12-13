@@ -26,25 +26,35 @@ inline velodyne_rawdata::VPoint convertRawPointToXYZ(const velodyne_rawdata::VPo
 {
   velodyne_rawdata::VPoint vpoint;
 
-  auto dist_part = (param.distance_scale_m * point.distance + param.dist_correction) * param.cos_vert_correction;
-  auto sin_point_azi = sin(point.azimuth);
-  auto cos_point_azi = cos(point.azimuth);
-  auto cos_horizontal_rot_correction = param.cos_rot_correction;
-  auto sin_horizontal_rot_correction = param.sin_rot_correction;
+  float x_coord;
+  float y_coord;
+  float z_coord;
 
-  vpoint.x = dist_part * 
-            ( sin_point_azi*cos_horizontal_rot_correction - cos_point_azi*sin_horizontal_rot_correction )
-            - param.horiz_offset_correction * (cos_point_azi*cos_horizontal_rot_correction + sin_point_azi*sin_horizontal_rot_correction);
+  if (point.distance == 0){
+    x_coord = y_coord = z_coord = nanf("");
+  }
+  else
+  {
+    auto dist_part = (param.distance_scale_m * point.distance + param.dist_correction) * param.cos_vert_correction;
+    auto sin_point_azi = sin(point.azimuth);
+    auto cos_point_azi = cos(point.azimuth);
+    auto cos_horizontal_rot_correction = param.cos_rot_correction;
+    auto sin_horizontal_rot_correction = param.sin_rot_correction;
 
-  vpoint.y = dist_part * 
-            ( cos_point_azi*cos_horizontal_rot_correction + sin_point_azi*sin_horizontal_rot_correction )
-            + param.horiz_offset_correction * (sin_point_azi*cos_horizontal_rot_correction - cos_point_azi*sin_horizontal_rot_correction);
+    vpoint.x = dist_part * 
+              ( sin_point_azi*cos_horizontal_rot_correction - cos_point_azi*sin_horizontal_rot_correction )
+              - param.horiz_offset_correction * (cos_point_azi*cos_horizontal_rot_correction + sin_point_azi*sin_horizontal_rot_correction);
 
-  vpoint.z = (param.distance_scale_m * point.distance + param.dist_correction) * param.sin_vert_correction + param.vert_offset_correction;
-  
-  auto x_coord = vpoint.y;
-  auto y_coord = -vpoint.x;
-  auto z_coord = vpoint.z;
+    vpoint.y = dist_part * 
+              ( cos_point_azi*cos_horizontal_rot_correction + sin_point_azi*sin_horizontal_rot_correction )
+              + param.horiz_offset_correction * (sin_point_azi*cos_horizontal_rot_correction - cos_point_azi*sin_horizontal_rot_correction);
+
+    vpoint.z = (param.distance_scale_m * point.distance + param.dist_correction) * param.sin_vert_correction + param.vert_offset_correction;
+    
+    x_coord = vpoint.y;
+    y_coord = -vpoint.x;
+    z_coord = vpoint.z;
+  }
 
   vpoint.x = x_coord;
   vpoint.y = y_coord;
@@ -55,6 +65,7 @@ inline velodyne_rawdata::VPoint convertRawPointToXYZ(const velodyne_rawdata::VPo
   vpoint.time = point.time;
   vpoint.distance = param.distance_scale_m * point.distance + param.dist_correction;
   vpoint.ring = point.ring;
+  vpoint.return_number = point.return_number;
   return vpoint;
 }
 
@@ -66,7 +77,8 @@ namespace velodyne_pointcloud
     data_(new velodyne_rawdata::RawData()),
     init_success(true),
     last_rpm_(-1),
-    last_rpm_raw_(-1)
+    last_rpm_raw_(-1),
+    remove_nan_(true)
   {
     rawCloud.reset(new velodyne_rawdata::VPointCloudRaw());
 
@@ -76,6 +88,8 @@ namespace velodyne_pointcloud
       init_success = false;
       return;
     }
+
+    private_nh.getParam("remove_nan", remove_nan_);
 
 
     // advertise output point cloud (before subscribing to input data)
@@ -198,9 +212,13 @@ namespace velodyne_pointcloud
     int i=0;
     for (auto pt : rawCloud->points)
     {
+      if (remove_nan_ && pt.distance == 0){
+        continue;
+      }
       outMsg.pc->points[i] = convertRawPointToXYZ(pt, laser_corrections[pt.laser_num]);
       ++i;
     }
+    outMsg.pc->points.resize(i);
     outMsg.finalize();
 
     // publish the accumulated cloud message

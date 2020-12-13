@@ -36,6 +36,8 @@
 #include <kaarta_io/ScanInfoManagerClient.hpp>
 #include <thread>
 
+#include <clay_lib/stencil_constants.h>
+
 namespace velodyne_rawdata
 {
   ////////////////////////////////////////////////////////////////////////
@@ -50,6 +52,12 @@ namespace velodyne_rawdata
     nh_private_ptr_(NULL),
     laser_model_forced_(false)
   {
+    // Set up cached values for sin and cos of all the possible headings
+    for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
+      double rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
+      cos_rot_table_[rot_index] = cos(rotation);
+      sin_rot_table_[rot_index] = sin(rotation);
+    }
   }
 
   /** Update parameters: conversions and update */
@@ -82,9 +90,9 @@ namespace velodyne_rawdata
     }
   }
 
-  bool RawData::configureLaserParams(int in_laser_model, bool dual_mode, bool override){
+  bool RawData::configureLaserParams(int in_laser_model, uint8_t return_type, bool override){
     bool res = true;
-    ROS_INFO("Configuring laser_model to: %d. Dual mode: %d. Override = %d", in_laser_model, dual_mode, override);
+    ROS_INFO("Configuring laser_model to: %d. Return mode: %#02x. Override = %d", in_laser_model, return_type, override);
     laser_model_ = in_laser_model;
 
     if (!offline_setup_)
@@ -102,6 +110,8 @@ namespace velodyne_rawdata
       }
     }
 
+    config_.return_type = return_type;
+
     if (override){
       if (!offline_setup_)
       {
@@ -113,15 +123,16 @@ namespace velodyne_rawdata
           if (client.init(true)){
             client.publishFormatStr("/adjusted_laser_model", "true");
             client.publishFormatStr("/laser_model", "%d", laser_model_);
+            client.publishFormatStr("/laser_return_type", "%#02x", (int)config_.return_type);
           }
         });
         t.detach();
         nh_private_ptr_->setParam("/laser_model", laser_model_);
+        nh_private_ptr_->setParam("/laser_return_type", config_.return_type);
       }
     }
 
     // get path to angles.config file for this device
-    config_.dual_return_mode = dual_mode;
     config_.expected_factory_byte = (uint8_t) 0;
     std::string pkgPath = ros::package::getPath("velodyne_pointcloud");
     std::string fallbackCalibrationFile;
@@ -165,14 +176,6 @@ namespace velodyne_rawdata
       res = false;
     }
 
-    // Set up cached values for sin and cos of all the possible headings
-    for (uint16_t rot_index = 0; rot_index < ROTATION_MAX_UNITS; ++rot_index) {
-      double rotation = angles::from_degrees(ROTATION_RESOLUTION * rot_index);
-      cos_rot_table_[rot_index] = cos(rotation);
-      sin_rot_table_[rot_index] = sin(rotation);
-    }
-
-    ROS_INFO_STREAM("Number of lasers: " << calibration_.num_lasers << ". Building firing times lookup table. Dual mode = " << config_.dual_return_mode);
     buildTimings();
 
     return res;
@@ -191,6 +194,18 @@ namespace velodyne_rawdata
     {
       ROS_ERROR("No laser model parameter set. Using: %d", laser_model_);
     }
+
+    int tLaserReturnType = 0;
+    if (!private_nh.getParam("/laser_return_type", tLaserReturnType))
+    {
+      config_.return_type = Kaarta::StencilConstants::STRONGEST;
+      ROS_ERROR("No laser_return_type parameter set. Using: %#02x", config_.return_type);
+    }
+    else{
+      config_.return_type = tLaserReturnType;
+      ROS_INFO("Got laser_return_type parameter. Using: %#02x", config_.return_type);
+    }
+
     laser_model_forced_ = false;
     if (private_nh.getParam("/force_laser_model", laser_model_))
     {
@@ -202,7 +217,7 @@ namespace velodyne_rawdata
       ROS_ERROR("Failed to read calibration file parameter. Falling back to model specific calibration");
       // res = 1;
     }
-    if (!configureLaserParams(laser_model_, false, true)){
+    if (!configureLaserParams(laser_model_, config_.return_type, true)){
       ROS_WARN("Failed to configure laser params to laser model: %d", laser_model_);
       res = 2;
     }
@@ -242,7 +257,7 @@ namespace velodyne_rawdata
     config_.calibrationFile = _calibration;
     upward_ = _upward;
 
-    if (!configureLaserParams(laser_model_, false)){
+    if (!configureLaserParams(laser_model_, config_.return_type)){
       res = 2;
       ROS_WARN("Failed to configure laser params to laser model: %d", laser_model_);
     }
@@ -254,6 +269,10 @@ namespace velodyne_rawdata
 
 
   bool RawData::buildTimings(){
+    bool is_dual_mode = config_.return_type == Kaarta::StencilConstants::DUAL;
+
+    ROS_INFO_STREAM("Number of lasers: " << calibration_.num_lasers << ". Building firing times lookup table. Dual mode = " << is_dual_mode );
+
     // vlp16
     if (laser_model_ == Kaarta::StencilConstants::TYPE_VLP16){
       // timing table calculation, from velodyne user manual
@@ -268,7 +287,7 @@ namespace velodyne_rawdata
       // compute timing offsets
       for (size_t x = 0; x < timing_offsets_.size(); ++x){
         for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
-          if (config_.dual_return_mode){
+          if (is_dual_mode){
             dataBlockIndex = (x - (x % 2)) + (y / 16);
           }
           else{
@@ -294,7 +313,7 @@ namespace velodyne_rawdata
       // compute timing offsets
       for (size_t x = 0; x < timing_offsets_.size(); ++x){
         for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
-          if (config_.dual_return_mode){
+          if (is_dual_mode){
             dataBlockIndex = x / 2;
           }
           else{
@@ -319,7 +338,7 @@ namespace velodyne_rawdata
       // compute timing offsets
       for (size_t x = 0; x < timing_offsets_.size(); ++x){
         for (size_t y = 0; y < timing_offsets_[x].size(); ++y){
-          if (config_.dual_return_mode){
+          if (is_dual_mode){
             dataBlockIndex = x / 2;
           }
           else{
@@ -355,34 +374,38 @@ namespace velodyne_rawdata
 
   void RawData::modelDetection(const velodyne_msgs::VelodynePacket &pkt)
   {
-    bool pkt_dual_mode = pkt.data[0x4b4] == 0x39;
-    if (pkt.data[0x4b4] != 0x37){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
-      switch(pkt.data[0x4b4])
+    uint8_t return_tmp = pkt.data[0x4b4];
+
+    if (return_tmp != Kaarta::StencilConstants::STRONGEST){ // return mode: strongest = 0x37, last = 0x38, dual = 0x39
+      switch(return_tmp)
       {
-        case 0x38:
+        case Kaarta::StencilConstants::LAST:
           ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (last)", pkt.data[0x4b4]);
           break;
-        case 0x39:
+        case Kaarta::StencilConstants::DUAL:
           ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (dual)", pkt.data[0x4b4]);
           break;
+        case Kaarta::StencilConstants::UNKNOWN:
         default:
           ROS_ERROR_THROTTLE(10, "Expected return mode: 0x37 (strongest). Got: %#02x (unknown)", pkt.data[0x4b4]);
           break;
       }
     }
 
-    if (pkt.data[0x4b5] != config_.expected_factory_byte || pkt_dual_mode != config_.dual_return_mode){
+    auto factory_byte_tmp = pkt.data[0x4b5];
+
+    if (factory_byte_tmp != config_.expected_factory_byte || return_tmp != config_.return_type){
       if (laser_model_forced_)
       {
-        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected model: %#02x. Data packet gives: %#02x", laser_model_, config_.expected_factory_byte, pkt.data[0x4b5]);
-        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected Dual mode = %d. Dual mode = %d", laser_model_, config_.dual_return_mode, pkt_dual_mode);
+        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected model: %#02x. Data packet gives: %#02x", laser_model_, config_.expected_factory_byte, factory_byte_tmp);
+        ROS_WARN_THROTTLE(10, "Forced model: %d. Expected return mode = %#02x. return mode = %#02x", laser_model_, config_.return_type, return_tmp);
       }
       else
       {
-        ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, pkt.data[0x4b5]);
-        ROS_WARN_THROTTLE(1, "Expected Dual mode = %d. Dual mode = %d", config_.dual_return_mode, pkt_dual_mode);
+        ROS_WARN_THROTTLE(1, "Expected model: %#02x. Data packet gives: %#02x", config_.expected_factory_byte, factory_byte_tmp);
+        ROS_WARN_THROTTLE(1, "Expected return mode = %#02x. return mode = %#02x", config_.return_type, return_tmp);
         int detected_model = -1;
-        switch(pkt.data[0x4b5]){
+        switch(factory_byte_tmp){
           case 0x22:
             detected_model = Kaarta::StencilConstants::TYPE_VLP16;
             break;
@@ -393,15 +416,15 @@ namespace velodyne_rawdata
             detected_model = Kaarta::StencilConstants::TYPE_HDL32;
             break;
           default:
-            ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", pkt.data[0x4b5]);
+            ROS_ERROR_THROTTLE(1, "Error: unsupported model # in velodyne packet header: %#02x", factory_byte_tmp);
             exit(1);
         }
         if (detected_model != -1)
         {
-          if (detected_model != laser_model_ || config_.dual_return_mode != pkt_dual_mode)
+          if (detected_model != laser_model_ || config_.return_type != return_tmp)
           {
-            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to %d with dual return mode: %d", detected_model, pkt_dual_mode);
-            configureLaserParams(detected_model, pkt_dual_mode, true);
+            ROS_WARN_THROTTLE(1, "Adjusting laser_model param to %d with dual return mode: %#02x", detected_model, return_tmp);
+            configureLaserParams(detected_model, return_tmp, true);
           }
         }
       }
@@ -416,9 +439,29 @@ namespace velodyne_rawdata
         // ROS_INFO_STREAM("Got laser_model param: " << laser_model_tmp);
         if (laser_model_tmp != laser_model_)
         {
-          ROS_WARN_STREAM("Setting laser_model param: " << laser_model_tmp);
+          ROS_INFO_STREAM("Setting /laser_model param: " << laser_model_tmp);
           nh_private_ptr_->setParam("/laser_model", laser_model_);
         }
+      }
+      else
+      {
+        ROS_INFO_STREAM("Setting /laser_model param: " << laser_model_tmp);
+        nh_private_ptr_->setParam("/laser_model", laser_model_);
+      }
+
+      int laser_return_tmp = -1;
+      if (nh_private_ptr_->getParamCached("/laser_return_type", laser_return_tmp))
+      {
+        // ROS_INFO_STREAM("Got laser_return_type param: " << laser_return_tmp);
+        if (laser_return_tmp != config_.return_type)
+        {
+          ROS_INFO_STREAM("Setting /laser_return_type param: " << config_.return_type);
+          nh_private_ptr_->setParam("/laser_return_type", config_.return_type);
+        }
+      }
+      else{
+        ROS_INFO_STREAM("Setting /laser_return_type param: " << config_.return_type);
+        nh_private_ptr_->setParam("/laser_return_type", config_.return_type);
       }
     }
   }
@@ -448,7 +491,8 @@ namespace velodyne_rawdata
 
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
 
-    int block_jump = config_.dual_return_mode ? 2 : 1;
+    bool is_dual_return = config_.return_type == Kaarta::StencilConstants::DUAL;
+    int block_jump = is_dual_return ? 2 : 1;
     for (int block = 0; block < BLOCKS_PER_PACKET; block += block_jump) {
 
       // upper bank lasers are numbered [0..31]
@@ -498,7 +542,7 @@ namespace velodyne_rawdata
         uint8_t laser_number;       ///< hardware laser number
 
         laser_number = j + bank_origin;
-        velodyne_pointcloud::LaserCorrection &corrections =
+        const velodyne_pointcloud::LaserCorrection &corrections =
           calibration_.laser_corrections[laser_number];
 
         /** Position Calculation */
@@ -507,10 +551,11 @@ namespace velodyne_rawdata
         tmp.bytes[0] = raw->blocks[block].data[k];
         tmp.bytes[1] = raw->blocks[block].data[k+1];
         intensity = raw->blocks[block].data[k+2];
-        if (config_.dual_return_mode)
+        if (is_dual_return)
         {
           // in dual return mode, the packets are in the order of Last, Strongest/Second strongest
-          // If the second data block's return has a greater intensity than the first (ie last != strongest)
+          // If the second data block's return has a greater intensity than the first (ie last != strongest),
+          //   then we will use the strongest (second) point
           if (raw->blocks[block].data[k+2] < raw->blocks[block + 1].data[k+2])
           {
             intensity = raw->blocks[block + 1].data[k+2];
@@ -703,7 +748,8 @@ namespace velodyne_rawdata
 
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
 
-    int block_jump = config_.dual_return_mode ? 2 : 1;
+    bool is_dual_return = config_.return_type == Kaarta::StencilConstants::DUAL;
+    int block_jump = is_dual_return ? 2 : 1;
     for (int block = 0; block < BLOCKS_PER_PACKET; block += block_jump) {
 
       // ignore packets with mangled or otherwise different contents
@@ -744,7 +790,7 @@ namespace velodyne_rawdata
       for (int firing=0, k=0; firing < VLP16_FIRINGS_PER_BLOCK; firing++){
         for (int dsr=0; dsr < VLP16_SCANS_PER_FIRING; dsr++, k+=RAW_SCAN_SIZE){
 
-          velodyne_pointcloud::LaserCorrection &corrections =
+          const velodyne_pointcloud::LaserCorrection &corrections =
             calibration_.laser_corrections[dsr];
 
           /** Position Calculation */
@@ -755,10 +801,8 @@ namespace velodyne_rawdata
           tmp.bytes[0] = raw->blocks[block].data[k];
           tmp.bytes[1] = raw->blocks[block].data[k+1];
 
-          if (config_.dual_return_mode)
+          if (is_dual_return)
           {
-            point_time = timing_offsets_[block][dsr] + time_diff_start_to_this_packet;
-
             // in dual return mode, the packets are in the order of Last (even blocks), Strongest/Second strongest (odd blocks)
             // If the second data block's return has a greater intensity than the first (ie last != strongest)
             if (raw->blocks[block].data[k+2] < raw->blocks[block + 1].data[k+2])
@@ -769,8 +813,9 @@ namespace velodyne_rawdata
             }
           }
           else{
-            point_time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+            // point_time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
           }
+          point_time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
 
           /** correct for the laser rotation as a function of timing during the firings **/
           azimuth_corrected_f = azimuth + (azimuth_diff * ((dsr*VLP16_DSR_TOFFSET) + (firing*VLP16_FIRING_TOFFSET)) / VLP16_BLOCK_TDURATION);
@@ -957,7 +1002,10 @@ namespace velodyne_rawdata
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
     int last_azimuth_diff = 20; // TODO: default to 600 RPM assumption
 
-    for (int block = 0; block < BLOCKS_PER_PACKET; block++) {
+    bool is_dual_return = config_.return_type == Kaarta::StencilConstants::DUAL;
+    int block_jump = is_dual_return ? 2 : 1;
+    for (int block = 0; block < BLOCKS_PER_PACKET; block += block_jump) {
+    // for (int block = 0; block < BLOCKS_PER_PACKET; block++) {
 
       // upper bank lasers are numbered [0..31]
       // NOTE: this is a change from the old velodyne_common implementation
@@ -970,8 +1018,8 @@ namespace velodyne_rawdata
       uint16_t block_azimuth = raw->blocks[block].rotation;
 
       int azimuth_diff = 0;
-      if (block < (BLOCKS_PER_PACKET-1)){
-        int raw_azimuth_diff = (int)(raw->blocks[block+1].rotation) - (int)raw->blocks[block].rotation;
+      if (block < (BLOCKS_PER_PACKET-block_jump)){
+        int raw_azimuth_diff = (int)(raw->blocks[block+block_jump].rotation) - (int)raw->blocks[block].rotation;
 
         // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)
@@ -995,7 +1043,7 @@ namespace velodyne_rawdata
         uint8_t laser_number;       ///< hardware laser number
 
         laser_number = j + bank_origin;
-        velodyne_pointcloud::LaserCorrection &corrections =
+        const velodyne_pointcloud::LaserCorrection &corrections =
           calibration_.laser_corrections[laser_number];
 
         /** Position Calculation */
@@ -1003,7 +1051,21 @@ namespace velodyne_rawdata
         union two_bytes tmp;
         tmp.bytes[0] = raw->blocks[block].data[k];
         tmp.bytes[1] = raw->blocks[block].data[k+1];
-          /** correct for the laser rotation as a function of timing during the firings **/
+        uint8_t intensity = raw->blocks[block].data[k+2];
+        uint8_t second_intensity;
+        union two_bytes second_tmp;
+
+        if (is_dual_return)
+        {
+          // in dual return mode, the packets are in the order of Last, Strongest/Second strongest
+          // If the second data block's return has a greater intensity than the first (ie last != strongest),
+          //   then we will use the strongest (second) point
+          second_intensity = raw->blocks[block + 1].data[k+2];
+          second_tmp.bytes[0] = raw->blocks[block + 1].data[k];
+          second_tmp.bytes[1] = raw->blocks[block + 1].data[k+1];
+        }
+
+        /** correct for the laser rotation as a function of timing during the firings **/
         uint16_t azimuth_corrected = round( block_azimuth + (azimuth_diff * ( (j / 2) * single_firing) / block_duration) );
         azimuth_corrected = ((int)azimuth_corrected) % 36000;
         // ROS_ERROR_STREAM_COND(num > 1000, "Angle " << j <<": " << azimuth_corrected << " \t time = " << timing_offsets[block][j]);
@@ -1016,12 +1078,50 @@ namespace velodyne_rawdata
         point.laser_num = laser_number;
         point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
         point.distance = tmp.uint;
-        point.intensity = raw->blocks[block].data[k+2];
+        point.intensity = intensity;
         if (timing_offsets_.size())
         {
           point.time = timing_offsets_[block][j] + time_diff_start_to_this_packet;
         }
-        data->points.push_back(point);
+        // figure out dual return status/adding
+        switch(config_.return_type){
+          case Kaarta::StencilConstants::LAST:
+            point.return_number = velodyne_rawdata::VPointRaw::LAST;
+            data->points.push_back(point);
+            break;
+          case Kaarta::StencilConstants::STRONGEST:
+            point.return_number = velodyne_rawdata::VPointRaw::STRONGEST;
+            data->points.push_back(point);
+            break;
+          case Kaarta::StencilConstants::DUAL:
+            point.return_number = velodyne_rawdata::VPointRaw::LAST;
+            // see if this is also the strongest return
+            if (intensity >= second_intensity){
+              point.return_number |= velodyne_rawdata::VPointRaw::STRONGEST;
+            }
+            data->points.push_back(point);
+
+            if (intensity == second_intensity && second_tmp.uint == tmp.uint)
+            {
+              //duplicate point. don't add
+            }
+            else{
+              // also add the extra point to the cloud
+              point.intensity = second_intensity;
+              point.distance = second_tmp.uint;
+              if (second_intensity > intensity){
+                point.return_number = velodyne_rawdata::VPointRaw::STRONGEST;
+                data->points.push_back(point);
+              }
+              else if (second_intensity < intensity){
+                point.return_number = velodyne_rawdata::VPointRaw::SECOND_STRONGEST;
+                data->points.push_back(point);
+              }
+              else{
+                ROS_WARN_THROTTLE(1, "Got dual return where intensity1 == intensity2 but different distances: %d : %d", tmp.uint, second_tmp.uint);
+              }
+            }
+        }
       }
     }
   }
@@ -1037,7 +1137,9 @@ namespace velodyne_rawdata
 
     const raw_packet_t *raw = (const raw_packet_t *) &pkt.data[0];
 
-    for (int block = 0; block < BLOCKS_PER_PACKET; block++) {
+    bool is_dual_return = config_.return_type == Kaarta::StencilConstants::DUAL;
+    int block_jump = is_dual_return ? 2 : 1;
+    for (int block = 0; block < BLOCKS_PER_PACKET; block += block_jump) {
 
       // ignore packets with mangled or otherwise different contents
       if (UPPER_BANK != raw->blocks[block].header) {
@@ -1051,14 +1153,14 @@ namespace velodyne_rawdata
       int raw_azimuth_diff;
 
       // Calculate difference between current and next block's azimuth angle.
-      if (block < (BLOCKS_PER_PACKET-1)){
-        raw_azimuth_diff = raw->blocks[block+1].rotation - raw->blocks[block].rotation;
+      if (block < (BLOCKS_PER_PACKET - block_jump)){
+        raw_azimuth_diff = raw->blocks[block + block_jump].rotation - raw->blocks[block].rotation;
         azimuth_diff = (float)((36000 + raw_azimuth_diff)%36000);
 
         // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
         {
-          ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block+1].rotation);
+          ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block + block_jump].rotation);
           // if last_azimuth_diff was not zero, we can assume that the velodyne's speed did not change very much and use the same difference
           if(last_azimuth_diff > 0){
             azimuth_diff = last_azimuth_diff;
@@ -1075,13 +1177,29 @@ namespace velodyne_rawdata
       for (int firing=0, k=0; firing < VLP16_FIRINGS_PER_BLOCK; firing++){
         for (int dsr=0; dsr < VLP16_SCANS_PER_FIRING; dsr++, k+=RAW_SCAN_SIZE){
 
-          velodyne_pointcloud::LaserCorrection &corrections =
+          const velodyne_pointcloud::LaserCorrection &corrections =
             calibration_.laser_corrections[dsr];
 
           /** Position Calculation */
           union two_bytes tmp;
           tmp.bytes[0] = raw->blocks[block].data[k];
           tmp.bytes[1] = raw->blocks[block].data[k+1];
+          uint8_t intensity = raw->blocks[block].data[k+2];
+
+          union two_bytes second_tmp;
+          uint8_t second_intensity;
+
+          if (is_dual_return)
+          {
+
+            // in dual return mode, the packets are in the order of Last (even blocks), Strongest/Second strongest (odd blocks)
+            // If the second data block's return has a greater intensity than the first (ie last != strongest)
+            second_intensity = raw->blocks[block + 1].data[k+2];
+            second_tmp.bytes[0] = raw->blocks[block + 1].data[k];
+            second_tmp.bytes[1] = raw->blocks[block + 1].data[k+1];
+          }
+
+          point.time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;;
 
           auto azimuth = raw->blocks[block].rotation;
 
@@ -1095,12 +1213,46 @@ namespace velodyne_rawdata
           point.laser_num = dsr;
           point.azimuth = (azimuth_corrected / 100.0) * (M_PI / 180.0); // 100ths of degrees to rad
           point.distance = tmp.uint;
-          point.intensity = raw->blocks[block].data[k+2];
-          if (timing_offsets_.size())
-          {
-            point.time = timing_offsets_[block][firing * 16 + dsr] + time_diff_start_to_this_packet;
+          point.intensity = intensity;
+          // data->points.push_back(point);
+          switch(config_.return_type){
+            case Kaarta::StencilConstants::LAST:
+              point.return_number = velodyne_rawdata::VPointRaw::LAST;
+              data->points.push_back(point);
+              break;
+            case Kaarta::StencilConstants::STRONGEST:
+              point.return_number = velodyne_rawdata::VPointRaw::STRONGEST;
+              data->points.push_back(point);
+              break;
+            case Kaarta::StencilConstants::DUAL:
+              point.return_number = velodyne_rawdata::VPointRaw::LAST;
+              // see if this is also the strongest return
+              if (intensity >= second_intensity){
+                point.return_number |= velodyne_rawdata::VPointRaw::STRONGEST;
+              }
+              data->points.push_back(point);
+
+              if (intensity == second_intensity && second_tmp.uint == tmp.uint)
+              {
+                //duplicate point. don't add
+              }
+              else{
+                // also add the extra point to the cloud
+                point.intensity = second_intensity;
+                point.distance = second_tmp.uint;
+                if (second_intensity > intensity){
+                  point.return_number = velodyne_rawdata::VPointRaw::STRONGEST;
+                  data->points.push_back(point);
+                }
+                else if (second_intensity < intensity){
+                  point.return_number = velodyne_rawdata::VPointRaw::SECOND_STRONGEST;
+                  data->points.push_back(point);
+                }
+                else{
+                  ROS_WARN_THROTTLE(1, "Got dual return where intensity1 == intensity2 but different distances: %d : %d", tmp.uint, second_tmp.uint);
+                }
+              }
           }
-          data->points.push_back(point);
         }
       }
     }
