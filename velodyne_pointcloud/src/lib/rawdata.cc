@@ -771,7 +771,7 @@ namespace velodyne_rawdata
         // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
         {
-          ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block + block_jump].rotation);
+          ROS_DEBUG_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block + block_jump].rotation);
           // if last_azimuth_diff was not zero, we can assume that the velodyne's speed did not change very much and use the same difference
           if(last_azimuth_diff > 0){
             azimuth_diff = last_azimuth_diff;
@@ -1160,7 +1160,7 @@ namespace velodyne_rawdata
         // some packets contain an angle overflow where azimuth_diff < 0
         if(raw_azimuth_diff < 0)//raw->blocks[block+1].rotation - raw->blocks[block].rotation < 0)
         {
-          ROS_INFO_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block + block_jump].rotation);
+          ROS_DEBUG_STREAM_THROTTLE(60, "Packet containing angle overflow, first angle: " << raw->blocks[block].rotation << " second angle: " << raw->blocks[block + block_jump].rotation);
           // if last_azimuth_diff was not zero, we can assume that the velodyne's speed did not change very much and use the same difference
           if(last_azimuth_diff > 0){
             azimuth_diff = last_azimuth_diff;
